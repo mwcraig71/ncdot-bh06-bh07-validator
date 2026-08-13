@@ -67,6 +67,12 @@ footprint, claimed by no neighbour), that both I-485 carriageways are found bene
 features are numbered before below features, that route designations restart at R01 inside each
 feature, and that co-signed routes stay one feature with two route records.
 
+It then asserts the two things a reviewer actually does: that **opening** a bridge measures its
+features without anyone running a batch pass first, that opening it twice does not measure twice,
+and that the pin-drop popup no longer labels its answer "BH06 LRS Route ID" — it reports the road
+at the clicked point, which at a grade separation is usually not the road the bridge carries, and
+it says which of the open bridge's features that road is.
+
 Its last section feeds the tool the 24 September 2025 inspection report's own numbering — H05
 carried after three below features, R01 through R05 running straight across — and asserts that
 the tool flags the pattern instead of reproducing it.
@@ -77,7 +83,7 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **42** features — 168 in all.
+corrections, **37** auth, **50** features — 176 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

@@ -2286,17 +2286,15 @@ function rollUpFeatures(b){
    Everything the published submittal cannot supply. NCDOT's prior submittal
    holds no intersected features at all, so they have to be found in the road
    network — which is exactly the operation the twin-deck problem attacks. */
-async function deriveFeatures(scope){
-  const targets=(scope||ALL).filter(b=>b.LAT_DD&&b.LONG_DD);
-  if(!targets.length){ toast('Nothing in scope to expand.',4000); return; }
-  if(targets.length>400&&!confirm(targets.length.toLocaleString()+' structures, one spatial query each. '+
-     'Roughly '+Math.ceil(targets.length*0.6/60)+' minutes. Continue?')) return;
-  busy(true,'Expanding features','0 / '+targets.length,1);
-  twinScan();
-  let nUnder=0, nCarried=0, nReview=0, nRuled=0, nLow=0;
-  for(let i=0;i<targets.length;i++){
-    const b=targets[i];
-    try{
+/* One structure. Called for the whole scope by the Expand features button, and
+   for a single structure the moment a reviewer opens it — because "click a
+   bridge and see its features" is the point of the panel, and making somebody
+   run a batch pass first to find out what is under one bridge is not that. */
+async function expandOne(b,tally){
+  const t=tally||{under:0,carried:0,review:0,ruled:0,low:0};
+  if(!b||!b.LAT_DD||!b.LONG_DD) return t;
+  {
+    {
       const j=await esriQuery(ROADCHAR,{
         geometry:b.LONG_DD+','+b.LAT_DD, geometryType:'esriGeometryPoint', inSR:'4326',
         distance:'300', units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
@@ -2316,7 +2314,7 @@ async function deriveFeatures(scope){
       cand.forEach((v,rid)=>{
         if(rid===own) return;
         const cl=classifyCandidate(b,rid,v.paths,ctx);
-        if(cl.verdict==='reject'){ if(cl.neighbour) nRuled++; return; }
+        if(cl.verdict==='reject'){ if(cl.neighbour) t.ruled++; return; }
         const m=mAtPoint(v.paths,ctx.cx,ctx.cy);
         const f={des:'', loc:cl.verdict==='carried'?'C':'B', primary:false,
                  name:v.street||v.name||'', rid, mp:m&&m.m!=null?Math.round(m.m*1000)/1000:null,
@@ -2325,9 +2323,9 @@ async function deriveFeatures(scope){
                  why:cl.why, needsReview:cl.verdict==='review', _ord:++ord,
                  routes:routesFor(v.name||v.street||'',rid)};
         list.push(f);
-        if(cl.verdict==='under') nUnder++; else if(cl.verdict==='carried') nCarried++;
-        if(cl.verdict==='review') nReview++;
-        if(cl.confidence==='low') nLow++;
+        if(cl.verdict==='under') t.under++; else if(cl.verdict==='carried') t.carried++;
+        if(cl.verdict==='review') t.review++;
+        if(cl.confidence==='low') t.low++;
       });
       /* The primary below feature is the widest-carrying road beneath — in
          practice the one the inspector named in Feature Intersected. */
@@ -2336,17 +2334,48 @@ async function deriveFeatures(scope){
       const named=below.find(f=>{const d=decodeRID(f.rid); return d&&toks.includes(d.label);});
       (named||below[0]||{}).primary=true;
       b._feat=renumberFeatures(list);
+      b._featDone=true;
       rollUpFeatures(b);
-    }catch(e){ /* leave the published feature standing */ }
+    }
+  }
+  return t;
+}
+
+/* The whole scope, for an export or a submittal review. */
+async function deriveFeatures(scope){
+  const targets=(scope||ALL).filter(b=>b.LAT_DD&&b.LONG_DD);
+  if(!targets.length){ toast('Nothing in scope to expand.',4000); return; }
+  if(targets.length>400&&!confirm(targets.length.toLocaleString()+' structures, one spatial query each. '+
+     'Roughly '+Math.ceil(targets.length*0.6/60)+' minutes. Continue?')) return;
+  busy(true,'Expanding features','0 / '+targets.length,1);
+  twinScan();
+  const t={under:0,carried:0,review:0,ruled:0,low:0};
+  for(let i=0;i<targets.length;i++){
+    try{ await expandOne(targets[i],t); }catch(e){ /* leave the published feature standing */ }
     if(i%5===0) busy(true,'Expanding features',(i+1)+' / '+targets.length,(i+1)/targets.length*100);
   }
   applyFilters(); if(SEL) drawDetail(ALL.find(x=>x.BRDG_NBR===SEL));
   busy(false);
-  toast('Expanded '+targets.length.toLocaleString()+' structures — '+nUnder.toLocaleString()+
-    ' roadways beneath, '+nCarried.toLocaleString()+' additional roadways carried on the same deck, '+
-    nReview.toLocaleString()+' needing a look'+(nLow?' ('+nLow+' low confidence)':'')+
-    (nRuled?', '+nRuled.toLocaleString()+' candidates ruled out as belonging to a neighbouring structure':'')+
+  toast('Expanded '+targets.length.toLocaleString()+' structures — '+t.under.toLocaleString()+
+    ' roadways beneath, '+t.carried.toLocaleString()+' additional roadways carried on the same deck, '+
+    t.review.toLocaleString()+' needing a look'+(t.low?' ('+t.low+' low confidence)':'')+
+    (t.ruled?', '+t.ruled.toLocaleString()+' candidates ruled out as belonging to a neighbouring structure':'')+
     '. NCDOT publishes none of these; they are measured, so check them.',15000);
+}
+
+/* Opening a structure measures its features if nobody has yet. One request,
+   about half a second, and the answer is then held for the session. */
+let FEATBUSY=null;
+async function featuresOnOpen(bn){
+  const b=ALL.find(x=>x.BRDG_NBR===bn);
+  if(!b||b._featDone||b._featBusy||!b.LAT_DD) return;
+  if(!b._twins) twinScan();
+  b._featBusy=true;
+  try{ await expandOne(b); }
+  catch(e){ b._featErr=e.message||'the road network did not answer'; }
+  b._featBusy=false;
+  if(SEL===bn) drawDetail(b);
+  renderTable();
 }
 
 /* ---- the table NCDOT can load straight into their database ---- */
@@ -2710,6 +2739,7 @@ function renderTable(){
 function select(bn,fromTable){
   SEL=bn; const b=ALL.find(x=>x.BRDG_NBR===bn); if(!b) return;
   renderTable(); drawDetail(b); drawRoute(b._rid);
+  featuresOnOpen(bn);
   $('drawer').classList.add('open');
   if(fromTable&&b.LAT_DD) map.setView([b.LAT_DD,b.LONG_DD],Math.max(map.getZoom(),14));
   const row=$('tscroll').querySelector('tr.sel'); if(row&&!fromTable) row.scrollIntoView({block:'nearest'});
@@ -2749,10 +2779,22 @@ function featurePanel(b){
       ' Each has its own deck, so neither is a feature of the other. Routes carried on '+
       twins.map(t=>esc(t.bn)).join(' or ')+' are excluded from this structure’s features on purpose.</div>';
   }
-  if(fs.length===1&&!fs[0].origin.startsWith('derived')){
+  if(b._featBusy){
+    h+='<div class="find" style="border-left-color:#1E56B3;background:#EAF0FA"><b>Measuring</b>'+
+      'NCDOT’s submittal holds no intersected features, so the roadways under this structure are being '+
+      'measured against the road network. A second or so.</div>';
+  } else if(b._featErr){
+    h+='<div class="find w"><b>Could not measure the features</b>'+esc(b._featErr)+
+      '. The published carried feature is shown; anything below this structure is unknown until the road '+
+      'network answers. Try <b>Expand features</b> in Settings.</div>';
+  } else if(fs.length===1&&!fs[0].origin.startsWith('derived')&&!b._featDone){
     h+='<div class="find" style="border-left-color:#9A9A9A;background:#F4F4F4"><b>Only the published feature</b>'+
       'NCDOT’s submittal holds no intersected features, so nothing below this structure is known yet. '+
       'Run <b>Expand features</b> to measure them against the road network.</div>';
+  } else if(fs.filter(f=>f.loc==='B').length===0&&b._featDone){
+    h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6"><b>Nothing beneath it</b>'+
+      'Measured against the road network: no roadway passes under this structure. It spans something '+
+      'that is not a road — water, a railway, or open ground.</div>';
   }
   fs.forEach(f=>{
     const rid=effRidF(b,f), n=mp3(effMpF(b,f)), d=decodeRID(rid);
@@ -3055,17 +3097,37 @@ async function pinAt(lat,lon){
     if(!a) { toast('No NCDOT route found at that point.',4000); return; }
     const at=a.attributes, d=decodeRID(at.RID);
     const conc=[2,3,4,5,6].map(i=>at['Route'+i]).filter(Boolean);
-    L.popup({maxWidth:330}).setLatLng([lat,lon]).setContent(
-      '<div class="pop-t">Route &amp; milepoint at this point</div>'+
-      '<div class="pop-k">BH06 LRS Route ID</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
+    /* This popup answers "what road is at this spot", which at a grade separation
+       is usually NOT the road the selected bridge carries. It used to label its
+       answer "BH06 LRS Route ID", which read as though it were reporting the
+       bridge's BH06 and left two different numbers on screen contradicting each
+       other. It is a measurement; it now says so, and where the point lands on
+       an open structure it says which of that structure's features it matched. */
+    const sel=SEL?ALL.find(x=>x.BRDG_NBR===SEL):null;
+    const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
+    L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
+      '<div class="pop-t">The road at this point</div>'+
+      '<div class="pop-k">LRS Route ID here</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
       (d?'<div class="pop-k" style="margin-top:2px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
-      '<div class="pop-k" style="margin-top:7px">BH07 LRS Milepoint</div><div class="pop-v" style="font-size:15px">'+
+      '<div class="pop-k" style="margin-top:7px">Milepoint here, on that route</div><div class="pop-v" style="font-size:15px">'+
         (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
       (at.StreetName?'<div class="pop-k" style="margin-top:7px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
       (conc.length?'<div class="pop-k" style="margin-top:7px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
       '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px;line-height:1.45">'+
-      'This is the <b>nearest</b> route. At a grade separation that is often the road <b>underneath</b> — '+
-      'BH06 must be the route <b>carried on</b> the bridge.</div>').openOn(map);
+      (sel
+        ? (hit
+            ? 'On bridge <b>'+esc(sel.BRDG_NBR)+'</b> this road is feature <b>'+esc(hit.des)+'</b>, '+
+              (hit.loc==='C'?'carried on the bridge':'<b>below</b> the bridge')+'. '+
+              (hit.loc==='B'
+                ? 'Its milepoint belongs to that feature — not to the BH06 in the panel, which is the road the bridge carries.'
+                : 'This is the value the panel is testing.')
+            : 'This road is not one of bridge <b>'+esc(sel.BRDG_NBR)+'</b>’s features. The BH06 and BH07 in the '+
+              'panel belong to the road that bridge <b>carries</b>; this measurement belongs to whatever road '+
+              'happens to be nearest where you clicked.')
+        : 'This is the <b>nearest</b> route to the point you clicked. At a grade separation that is usually the '+
+          'road <b>underneath</b>. BH06 is the route <b>carried on</b> a bridge, so do not copy this into BH06 '+
+          'without checking which road it is.')+
+      '</div>').openOn(map);
   }catch(e){ busy(false); toast('Pin drop failed: '+e.message,6000); }
 }
 

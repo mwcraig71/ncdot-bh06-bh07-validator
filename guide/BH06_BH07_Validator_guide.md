@@ -120,7 +120,11 @@ Fill missing. A county takes about ten seconds. When it finishes you get one sum
 fully populated table.
 
 **Pin drop** lives on the map, top right — arm it and click anywhere to read the route and
-milepoint at that spot.
+milepoint at that spot. Read the label carefully: it reports **the road at the point you
+clicked**, which at a grade separation is usually the road *underneath*, not the road the bridge
+carries. If a bridge is open, the popup says which of that bridge's features the road you clicked
+actually is — so a milepoint of 46.958 in the popup and 2.672 in the panel is not a contradiction,
+it is I-485 below and I-85 above.
 
 Everything else lives behind **Settings**: signing in, the review file (save, open, merge),
 HPMS, the Locate tolerance, the vintage of the reference data, Diagnostics and the NCDOT table
@@ -416,8 +420,13 @@ as one. The bridge panel labels it "Legacy inv. route" and says so.
 
 ## Features — a bridge is not one row of BH06/BH07
 
-Click a bridge and the panel now lists its **features**: every roadway on it and every roadway
-under it, each with its own BH06, BH07 and findings.
+Click a bridge and the panel lists its **features**: every roadway on it and every roadway under
+it, each with its own BH06, BH07 and findings.
+
+NCDOT's submittal holds no roadways-below at all, so the ones beneath are **measured** the moment
+you open the bridge — one request, about a second, and then held for the rest of the session.
+There is nothing to run first. (**Settings → Expand features** does the same thing for a whole
+county at once, for an export.)
 
 Bridge 590819 is the clearest example. It carries **I-85 in both directions on one deck**, and
 three more roadways pass beneath it. That is five features, five BH06/BH07 pairs, one bridge

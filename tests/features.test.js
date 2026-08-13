@@ -267,6 +267,48 @@ const patchMock=()=>{
   ok('...and the one with no BH06 at all is not accused of reporting one',
      (rep.flags[3].flags||[]).includes('BH06_4_BELOW'),false);
 
-  console.log('\npage errors: '+JSON.stringify(errs));
+  console.log('\n13. Clicking a bridge shows its features, with no batch pass first');
+  const {p:p2}=await mk(b);
+  const e2=[]; p2.on('pageerror',e=>e2.push(e.message));
+  p2.on('dialog',d=>d.accept(''));
+  await p2.goto('file://'+FILE); await p2.waitForTimeout(2200);
+  await p2.evaluate(()=>{const a=document.getElementById('autoheavy'),h=document.getElementById('autohpms');
+    if(a)a.checked=false; if(h)h.checked=false;});
+  await p2.selectOption('#mode','county'); await p2.waitForTimeout(300);
+  await p2.selectOption('#arg','MECKLENBURG'); await p2.click('#run');
+  await p2.waitForFunction(()=>ALL.length>0,null,{timeout:60000});
+  await p2.evaluate(()=>loadSNBI()); await p2.waitForTimeout(2000);
+  ok('before opening it, only the published feature is known',
+     await p2.evaluate(()=>(ALL.find(x=>x.BRDG_NBR==='590819')._feat||[]).length||1),1);
+  await p2.evaluate(()=>select('590819',true));
+  await p2.waitForFunction(()=>{const x=ALL.find(y=>y.BRDG_NBR==='590819');return x&&x._featDone;},
+    null,{timeout:40000});
+  await p2.waitForTimeout(500);
+  const auto=await p2.evaluate(()=>{const x=ALL.find(y=>y.BRDG_NBR==='590819');
+    return {n:(x._feat||[]).length, c:(x._feat||[]).filter(f=>f.loc==='C').length,
+            u:(x._feat||[]).filter(f=>f.loc==='B').length,
+            txt:document.getElementById('dr-body').innerText};});
+  ok('opening it measured the rest',auto.n>1,true);
+  console.log('   '+auto.c+' carried, '+auto.u+' below, without touching Expand features');
+  ok('...and the panel shows them',/below bridge/i.test(auto.txt),true);
+  ok('the count in the header is right',
+     new RegExp(auto.c+' carried').test(auto.txt.replace(/\u00b7/g,'·')),true);
+  ok('a second open does not measure again',
+     await p2.evaluate(async()=>{const x=ALL.find(y=>y.BRDG_NBR==='590819');
+       const n=(x._feat||[]).length; select('590819',true);
+       await new Promise(r=>setTimeout(r,600));
+       return (x._feat||[]).length===n;}),true);
+
+  console.log('\n14. The pin drop is a measurement, not the bridge\'s BH06');
+  const pin=await p2.evaluate(()=>{
+    const src=document.documentElement.innerHTML;
+    return {oldLabel:/BH06 LRS Route ID<\/div>/.test(src)};});
+  ok('the popup no longer calls its answer "BH06 LRS Route ID"',pin.oldLabel,false);
+  const src2=fs.readFileSync(FILE,'utf8');
+  ok('it says what it actually is',/The road at this point/.test(src2),true);
+  ok('...and names the feature when the road is one of the open bridge\'s',
+     /this road is feature/i.test(src2),true);
+
+  console.log('\npage errors: '+JSON.stringify(errs.concat(e2)));
   await b.close();
 })();
