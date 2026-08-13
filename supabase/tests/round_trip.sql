@@ -572,3 +572,122 @@ begin
 
   raise exception E'BLOCK 3 - THE INGEST BOUNDARY (rolled back)\n%', array_to_string(r, E'\n');
 end $$;
+
+
+-- ============================================================================
+-- BLOCK 4 — FEATURES, ROUTES AND TWINS
+--
+-- A structure is a set of roadways, not a row. What has to hold: the population
+-- that gets a feature at all is the NBI set of ServiceOn codes and not just
+-- code 1; the crosswalk order survives a renumbering that has to swap two
+-- designations; route designations restart inside each feature; co-signed
+-- routes stay one feature with several route records; and a sister pair is
+-- recorded on both rows so the exclusion it drives can be audited.
+--
+-- Rolled back like the others.
+-- ============================================================================
+do $$
+declare r text[] := '{}'; cnt int; v text;
+  f1 uuid; f2 uuid; f3 uuid; f4 uuid;
+begin
+  r := r || format('%s  ServiceOn 6 (interchange overpass) carries a highway',
+        case when carries_highway('6') then 'PASS' else 'FAIL' end);
+  r := r || format('%s  ...and so does the decoded label the structures layer publishes',
+        case when carries_highway('Overpass structure at an interchange or second level of a multi-level interchange')
+             then 'PASS' else 'FAIL' end);
+  r := r || format('%s  a railroad bridge does not', case when not carries_highway('2') then 'PASS' else 'FAIL' end);
+  select count(*) into cnt from structures where carries_highway(service_on);
+  r := r || format('%s  the population is the NBI set, not just code 1: %s structures',
+        case when cnt between 19000 and 20500 then 'PASS' else 'FAIL' end, cnt);
+  select count(*) into cnt from features f where f.structure_number='590819';
+  r := r || format('%s  590819 (ServiceOn 6) now has a feature: %s',
+        case when cnt=1 then 'PASS' else 'FAIL' end, cnt);
+  select value_text into v from feature_values fv join features f on f.id=fv.feature_id
+   where f.structure_number='590819' and fv.field='BH06' and fv.source='PUBLISHED';
+  r := r || format('%s  ...with NCDOT''s published BH06 under test at last: %s',
+        case when v='10000085060' then 'PASS' else 'FAIL' end, v);
+
+  insert into structures (structure_number, county_name, county_sap, service_on, feature_carried, feature_intersected)
+  values ('TEST09','MECKLENBURG','060','6','I85','I485');
+  insert into features (structure_number, designation, location_type, feature_name, is_primary, created_at)
+  values ('TEST09','H01','C','I85NBL', true , now()-interval '4 min') returning id into f1;
+  insert into features (structure_number, designation, location_type, feature_name, is_primary, created_at)
+  values ('TEST09','H02','B','I485N',  true , now()-interval '3 min') returning id into f2;
+  insert into features (structure_number, designation, location_type, feature_name, is_primary, created_at)
+  values ('TEST09','H03','B','I485S',  false, now()-interval '2 min') returning id into f3;
+  -- the second carried roadway, established last, exactly as 590819's report numbers it
+  insert into features (structure_number, designation, location_type, feature_name, is_primary, created_at)
+  values ('TEST09','H04','C','I85SBL', false, now()-interval '1 min') returning id into f4;
+
+  begin
+    insert into features (structure_number, designation, location_type, feature_name, is_primary)
+    values ('TEST09','H09','C','ANOTHER PRIMARY', true);
+    r := r || 'FAIL  a second primary carried feature was accepted'::text;
+  exception when unique_violation then
+    r := r || 'PASS  only one primary carried roadway per structure'::text;
+  end;
+
+  perform renumber_features('TEST09');
+  select string_agg(designation||' '||location_type, ' ' order by feature_seq) into v
+    from features where structure_number='TEST09';
+  r := r || format('%s  carried first, then primary below, then the rest: %s',
+        case when v='H01 C H02 C H03 B H04 B' then 'PASS' else 'FAIL' end, v);
+  select designation into v from features where id=f4;
+  r := r || format('%s  the second carried roadway moved ahead of the roads beneath: H04 -> %s',
+        case when v='H02' then 'PASS' else 'FAIL' end, v);
+  select designation into v from features where id=f2;
+  r := r || format('%s  the primary below feature follows the carried ones: %s',
+        case when v='H03' then 'PASS' else 'FAIL' end, v);
+
+  insert into feature_routes (feature_id, route_designation, route_number, route_direction, reported_seq)
+  values (f1,'R01','I85NBL','NB',1), (f2,'R01','485','NB',2), (f3,'R01','485','SB',3), (f4,'R01','I85SBL','SB',5);
+  select count(*) into cnt from feature_routes where route_designation='R01';
+  r := r || format('%s  every feature starts at R01: %s do', case when cnt=4 then 'PASS' else 'FAIL' end, cnt);
+  begin
+    insert into feature_routes (feature_id, route_designation) values (f1,'R01');
+    r := r || 'FAIL  a duplicate designation inside one feature was accepted'::text;
+  exception when unique_violation then
+    r := r || 'PASS  a designation is unique inside its feature'::text;
+  end;
+  begin
+    insert into feature_routes (feature_id, route_designation) values (f1,'1');
+    r := r || 'FAIL  a malformed route designation was accepted'::text;
+  exception when check_violation then
+    r := r || 'PASS  a malformed route designation is refused'::text;
+  end;
+  select count(*) into cnt from check_designation_rules('TEST09') where rule_id='ROUTE_DESIGNATION_CONTINUOUS';
+  r := r || format('%s  designations that ran on across features are reported: %s',
+        case when cnt=3 then 'PASS' else 'FAIL' end, cnt);
+
+  update feature_routes set lrs_route_id='10000077060' where feature_id=f1;
+  insert into feature_routes (feature_id, route_designation, route_number, lrs_route_id)
+  values (f1,'R02','US21 NBL','20000021060');
+  select count(*) into cnt from feature_routes where feature_id=f1;
+  r := r || format('%s  two co-signed routes live under one feature: %s route records, 1 feature',
+        case when cnt=2 then 'PASS' else 'FAIL' end, cnt);
+  select count(*) into cnt from check_designation_rules('TEST09') where rule_id='CONCURRENCY_SPLIT';
+  r := r || format('%s  ...and that is not reported as a split: %s', case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+  update feature_routes set lrs_route_id='10000077060' where feature_id=f4;
+  select count(*) into cnt from check_designation_rules('TEST09') where rule_id='CONCURRENCY_SPLIT';
+  r := r || format('%s  but one roadway split across two features IS: %s', case when cnt>0 then 'PASS' else 'FAIL' end, cnt);
+
+  insert into structures (structure_number, county_name, county_sap, service_on) values ('TEST09B','MECKLENBURG','060','1');
+  insert into structure_twins (structure_number, twin_number, separation_ft, carried_route, twin_route)
+  values ('TEST09','TEST09B',51.0,'30000051060','30400051060'),
+         ('TEST09B','TEST09',51.0,'30400051060','30000051060');
+  select count(*) into cnt from structure_twins where 'TEST09' in (structure_number, twin_number);
+  r := r || format('%s  a sister pair is recorded on both rows: %s', case when cnt=2 then 'PASS' else 'FAIL' end, cnt);
+  begin
+    insert into structure_twins (structure_number, twin_number) values ('TEST09','TEST09');
+    r := r || 'FAIL  a structure was allowed to be its own twin'::text;
+  exception when check_violation then
+    r := r || 'PASS  a structure cannot be its own twin'::text;
+  end;
+
+  select count(*) into cnt from information_schema.role_table_grants
+   where table_name='structure_twins' and grantee in ('anon','authenticated') and privilege_type <> 'SELECT';
+  r := r || format('%s  no client may write the twin table: %s non-select grants',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+
+  raise exception E'BLOCK 4 - FEATURES, ROUTES AND TWINS (rolled back)\n%', array_to_string(r, E'\n');
+end $$;

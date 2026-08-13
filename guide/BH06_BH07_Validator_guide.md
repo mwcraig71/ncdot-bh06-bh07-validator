@@ -414,6 +414,83 @@ The service carries an **`InventoryRoute`** field — values like `131011380`. T
 **9-digit NBI inventory route**, not the LRS route ID. It is not BH06 and must not be reported
 as one. The bridge panel labels it "Legacy inv. route" and says so.
 
+## Features — a bridge is not one row of BH06/BH07
+
+Click a bridge and the panel now lists its **features**: every roadway on it and every roadway
+under it, each with its own BH06, BH07 and findings.
+
+Bridge 590819 is the clearest example. It carries **I-85 in both directions on one deck**, and
+three more roadways pass beneath it. That is five features, five BH06/BH07 pairs, one bridge
+number. You still search for 590819 and you still get one row in the table — the row is the
+structure. What you review is the features underneath it.
+
+Each feature shows:
+
+- **B.F.01 designation** (H01, H02…) and **B.F.02 location** — carried on the bridge, or below it
+- its own BH06 and BH07, with your corrections tested in place of the published values
+- its **route records** (R01, R02…) — the designations signed on that roadway
+- how it was found, and at what angle it crosses the deck
+
+**A road below the bridge gets no BH06.** It gets a highway record — the clearances and the
+traffic underneath are reported — but the LRS Route ID belongs to whichever structure *carries*
+that road. If a below feature has a BH06, the tool says so, and says it is B.F.02 that excludes
+it. That is a different finding from the one where **B.H.18** names another bridge as the carrier,
+because the remedy is different: one is a value that should not be there at all, the other is a
+value that belongs on somebody else's record.
+
+**Co-signed routes do not multiply features.** I-77 and US-21 on one deck are one feature with
+two route records and one BH06/BH07 pair. Reported as two features, the state reports the same
+length of road twice.
+
+### Two things NCDOT's own reports get wrong
+
+**Carried features come first.** Every carried roadway is numbered before the first roadway
+beneath. 590819's report numbers a carried roadway **H05**, after three below features.
+
+**Route designations restart at R01 inside each feature.** 590819's report runs **R01 through
+R05** straight across all five features, so "R03" does not tell you which route it is until you
+also know which feature it sits in.
+
+The tool numbers both correctly, records what the document said, and flags the difference. It
+does not quietly rewrite the report, because the fact that the report disagreed is itself worth
+keeping.
+
+---
+
+## Sister structures, and why the tool refuses some roads
+
+NCDOT publishes bridges as a single point, not an outline. So any question of the form "what is
+under this bridge" has to start from a circle around that point — and **twin decks carrying the
+two directions of a divided highway sit 40 to 120 ft apart.** In Mecklenburg alone there are
+**122 such pairs**. A plain circle around the northbound structure contains the southbound
+structure's road, and would report the road *next to* the bridge as the road *under* it.
+
+The tool does three things instead, and a road has to pass all three:
+
+1. **It rebuilds the deck.** The structure's length, deck width and skew give a rectangle
+   oriented along the road it carries. A sister deck 51 ft from a 45 ft-wide deck is outside it.
+2. **It checks the crossing angle against the recorded skew.** Skew is measured from square, so a
+   structure with 20° of skew should be crossed at 70°. On 590819 that predicted 70° and the two
+   I-485 carriageways came in at 69.8° and 68.4°. A road running *parallel* to the deck is not
+   crossing it. Note there is no fixed "too parallel" cutoff — on a 70° skew a real crossing runs
+   only 20° off parallel, and a fixed rule would throw away the most skewed bridges in the state.
+3. **It asks whether a neighbour carries it.** If another bridge number nearby has that road as
+   its own BH06, the road belongs to that bridge. This one needs no geometry at all, so it still
+   works when the dimensions are missing.
+
+When a bridge is one of a sister pair the panel says so, names the other bridge, and explains
+that routes carried on it are excluded on purpose. That matters: a road correctly refused looks
+exactly like a road the tool never found, and you should be able to tell them apart.
+
+**A road under a twin pair belongs to both.** Both structures report it, and that is correct —
+it is not a duplicate and the tool does not treat it as one.
+
+If a structure has no recorded length, deck width or skew, the tool falls back to the plain
+circle, marks everything it finds **low confidence**, and sends it to you rather than accepting
+it. Confirm those before they go anywhere.
+
+---
+
 ## Review — notes, status and clearing findings
 
 Every check the tool raises is a *suggestion*. Some will be wrong, some will be things you've

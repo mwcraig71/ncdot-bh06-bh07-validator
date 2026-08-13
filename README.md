@@ -43,6 +43,66 @@ still wrong:
 - Duplicate route+milepoint pairs, routes that don't exist, county-code mismatches,
   non-inventory directions, and more.
 
+## A structure is a set of features, not a row
+
+Bridge 590819 carries I-85 in **both** directions on a single 156 ft superstructure and spans
+three more roadways beneath it. That is five features — five separate BH06/BH07 pairs, five sets
+of findings, five review records — under one bridge number.
+
+The bridge number stays the search key and the table row, because that is what a reviewer looks
+for. Selecting it expands the features beneath it. **Reviewers search structures; they review
+features.**
+
+Three levels, and the middle one is what makes the arithmetic come out:
+
+```
+FEATURE   (B.F)    a roadway. B.F.01 designation, B.F.02 C carried / B below
+  ROUTE   (B.RT)   a designation signed on that roadway. Restarts at R01
+  HIGHWAY (B.H)    BH06 / BH07 — one pair per feature, never per route
+```
+
+Co-signed routes live at the route level. I-77 and US-21 on one deck are two route records under
+one feature and get one BH06/BH07 pair; promoted to features they would report the same length of
+road twice.
+
+Two things the tool checks about the *shape* of a feature set, because NCDOT's own reports get
+them wrong: carried features must be numbered before the first below feature (590819's report
+numbers a carried roadway H05, after three roadways beneath it), and B.RT.01 restarts at R01
+inside each feature (that report runs R01–R05 straight through, so "R03" does not identify a
+route until you also know which feature it is in). Both are flagged rather than reproduced.
+
+## Telling a road beneath from a road alongside
+
+NCDOT publishes structures as **points**, so every spatial test is a buffer around a coordinate.
+Twin decks carrying opposing directions of a divided highway sit 40 to 120 ft apart — inside the
+150 ft radius the tool has always used. Left alone, the northbound structure's buffer returns the
+southbound structure's carried route and admits a road running *alongside* the deck as though it
+ran *beneath* it. **Mecklenburg alone holds 122 such pairs.** It is the normal case at any
+divided highway.
+
+Three independent tests, all of which must pass, and they fail differently on purpose:
+
+- **A deck footprint, not a circle.** An oriented rectangle — `StructureLength` along the carried
+  route's local bearing by `BridgeDeckWidth` across it. A sister deck 51 ft from a 45 ft deck
+  falls outside it; a road passing underneath runs through it.
+- **The crossing angle against the recorded skew.** Skew is measured from the *perpendicular*, so
+  a road crossing a structure of skew S meets the deck at 90 − S degrees. There is no parallelism
+  cutoff, because on a 70° skew a legitimate crossing runs only 20° off parallel and any fixed
+  threshold would throw away the most skewed structures in the state. What is tested is
+  agreement. On 590819, a recorded skew of 20° predicts 70° and the two I-485 carriageways were
+  measured at 69.8° and 68.4°.
+- **Whether a neighbour carries it.** If another structure within range resolves that route as
+  its own BH06, or names it in Feature Carried, the route belongs to that structure — at any
+  separation, including one foot. This test needs no geometry, which is why it is the one that
+  holds when the dimensions are missing.
+
+A road passing beneath a twin pair is genuinely a feature of **both** structures, and is not
+deduplicated. The duplicate-pair check stays on carried values, where two structures at one point
+of one route really is impossible.
+
+Sister pairs are recorded on both rows and shown in the panel. A road correctly refused otherwise
+looks exactly like a road never found.
+
 ## A reviewer's correction is what gets validated
 
 Enter a corrected BH06 or BH07 in the bridge panel and every check re-runs against **that**
@@ -100,6 +160,11 @@ server to re-read NCDOT now, for when a republish lands between quarters.
   correcting route IDs changes that.
 - **The "23,022 bridges" population is really ~18,000.** The bridge layer also holds 2,853 sign
   structures and 2,025 pipes, which are not NBI structures.
+- **19,741 structures carry a highway, not 17,159.** `ServiceOn = 1` misses 1,282 interchange
+  overpasses, 1,286 highway-with-pedestrian structures and 14 multi-level ones — 2,582 in all,
+  which had no feature and therefore no BH06 or BH07 under test at all.
+- **Twin decks are everywhere.** 122 pairs in Mecklenburg alone sit within 250 ft of a structure
+  carrying the opposing direction of the same facility.
 - Concurrent routes on one deck still get a **single** BH06/BH07 — the extra designations are
   route records under one highway feature.
 

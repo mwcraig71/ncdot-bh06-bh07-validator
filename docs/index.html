@@ -527,6 +527,7 @@ body.on-imagery .cntylab{color:#fff;
         </div>
         <input type="file" id="revfile" accept=".json" style="display:none">
         <p class="hint" id="revstate">Notes, statuses and cleared findings live in a file you keep. Merge combines two reviewers.</p>
+        <div id="unmapped" style="display:none"></div>
       </div>
 
       <div class="setsec"><h4>HPMS &mdash; makes BH06-3 a real test</h4>
@@ -547,6 +548,7 @@ body.on-imagery .cntylab{color:#fff;
           <button class="btn ghost" id="locate" disabled>Locate</button>
           <button class="btn ghost" id="resolve" disabled>Resolve carried</button>
           <button class="btn ghost" id="fillnull" disabled>Fill missing</button>
+          <button class="btn ghost" id="expandfeat" disabled title="Finds the roadways beneath each structure, which NCDOT's submittal does not hold">Expand features</button>
           <button class="btn ghost" id="snbibtn" disabled>SNBI data</button>
         </div>
       </div>
@@ -655,8 +657,17 @@ const RULES=[
   d:'The LRS Route ID must not exceed 120 characters. NCDOT\u2019s 11-digit ID clears this by 109 characters.'},
  {id:'BH06_3_HPMS', grp:'fhwa', code:'BH06-3', sev:'e', t:'BH06 not found in HPMS',
   d:'The reported LRS Route ID must be valid and present in the state\u2019s HPMS submittal to FHWA. Load your HPMS route list to test this for real — until you do, this tool can only flag which routes are at risk.'},
- {id:'BH06_4_REDUNDANT', grp:'fhwa', code:'BH06-4', sev:'i', t:'Has an under-highway feature',
-  d:'This bridge crosses a highway, so your features dataset holds a second highway feature for the road below. BH06 is not reported for that feature at all, and BH06-4 additionally forbids it wherever B.H.18 (Crossing Bridge Number) shows the feature is carried on another bridge. Nothing to fix on this row — check the under-feature record.'},
+ /* BH06-4 was one rule fired off a regex over Feature Intersected, on the bridge
+    row, whose advice was that there was nothing to fix on that row. It was two
+    conditions with different remedies, and it was attached to the wrong object.
+    Now that features are records, it is two findings on the feature the exclusion
+    is actually about. */
+ {id:'BH06_4_BELOW', grp:'fhwa', code:'BH06-4', sev:'e', t:'BH06 reported on a feature below the bridge',
+  d:'Driven by B.F.02. This feature is the roadway PASSING BENEATH the structure, and BH06 is not reported for it at all. The highway record still exists — B.H.09 through B.H.17 describe the clearances and the traffic below — but the LRS Route ID is reported only where B.F.02 = C. Remove the value from this feature; do not move it to the carried one.'},
+ {id:'BH06_4_ONBRIDGE', grp:'fhwa', code:'BH06-4', sev:'e', t:'BH06 reported where B.H.18 names another structure',
+  d:'Driven by B.H.18 (Crossing Bridge Number), which is a different condition from the one above. This feature is carried, but on a DIFFERENT bridge — B.H.18 names it. The route belongs to that structure\u2019s record, so reporting BH06 here reports the same length of road twice.'},
+ {id:'HAS_UNDER_FEATURE', grp:'note', sev:'i', t:'Has roadways beneath it',
+  d:'This structure spans one or more highways, so it has intersected features as well as carried ones. Each has its own record in the panel. NCDOT\u2019s prior submittal holds no intersected features, so any shown here were measured against the road network rather than read from a file — check them.'},
  {id:'HPMS_MP_OUT', grp:'qc', sev:'w', t:'BH07 outside the HPMS extent',
   d:'The route is in HPMS but the milepoint falls outside the begin/end points HPMS holds for it. The route ID passes BH06-3 while the milepoint sits off the end of what the state actually reported. Needs the HPMS list loaded.'},
  {id:'BH07_1_NUM', grp:'fhwa', code:'BH07-1', sev:'e', t:'BH07 not a valid number',
@@ -693,7 +704,19 @@ const RULES=[
  {id:'REVIEWED_VALUE', grp:'note', sev:'i', t:'Validated on a reviewer’s correction',
   d:'Everything above was tested against a corrected value entered during review, not against what NCDOT currently publishes. That is deliberate — the corrected value is what will be submitted, so it is what has to pass. Both numbers are shown in the panel. Clearing this note is not the point of it: it exists so a corrected row can never be mistaken for a clean published one, and so you can filter for every correction and check the corrections themselves.'},
  {id:'PRECISION', grp:'note', sev:'i', t:'Low-precision milepoint',
-  d:'The published value carries fewer than three decimals, which usually means it was rounded or hand-entered rather than measured. BH07 is reported to three decimals — pad with zeros, but confirm the value first.'}
+  d:'The published value carries fewer than three decimals, which usually means it was rounded or hand-entered rather than measured. BH07 is reported to three decimals — pad with zeros, but confirm the value first.'},
+
+ /* ---------------- feature-level structure ---------------- */
+ {id:'FEATURE_ORDER', grp:'qc', sev:'w', t:'Feature designations out of crosswalk order',
+  d:'A carried feature is numbered after a feature below the bridge. The crosswalk numbers every carried feature first, then the primary below feature, then the rest. Bridge 590819 is numbered H01 carried, H02–H04 below, H05 carried — so the carried southbound roadway sorts after three roadways beneath it, and a reviewer reading down the list meets them in the wrong order.'},
+ {id:'ROUTE_DESIGNATION_CONTINUOUS', grp:'qc', sev:'w', t:'Route designations did not restart at R01',
+  d:'B.RT.01 restarts at R01 inside every feature. This document numbered them continuously across the whole structure — 590819 runs R01 to R05 across five features — so R03 does not identify a route until you also know which feature it sits in. The tool numbers them correctly and records what the document said, rather than reproducing the pattern.'},
+ {id:'CONCURRENCY_SPLIT', grp:'qc', sev:'e', t:'One roadway split into several features',
+  d:'Two features on this structure share a location and resolve to the same LRS route. Co-signed routes on one deck — I-77 and US-21 on the same superstructure — are ROUTE records under a single feature, and get a single BH06/BH07 pair. Split into separate features they report the same length of road twice.'},
+ {id:'TWIN_STRUCTURE', grp:'note', sev:'i', t:'One of a sister pair',
+  d:'Another bridge number sits within 250 ft carrying the opposing direction of the same facility — same class and number, different inventory digit. Each has its own deck, so neither is a feature of the other however close they sit. This is recorded because the exclusion it drives would otherwise be invisible: a road correctly refused looks exactly like a road never found.'},
+ {id:'FEATURE_LOW_CONF', grp:'note', sev:'i', t:'Feature found without deck dimensions',
+  d:'The structure records no length, deck width or skew, so this feature was admitted on a plain radius rather than on the deck footprint and the crossing angle. That is the test that cannot separate a road beneath from a road alongside. Confirm it before submitting.'}
 ];
 const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
 const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
@@ -701,6 +724,7 @@ const SEVNAME={e:'Error',w:'Warning',i:'Note',ok:'Clean'};
 
 /* ---------- state ---------- */
 let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN={}, DEEP=false;
+let LASTIMPORT={unmapped:[],at:0};   /* what the last review-file import could not place */
 let REVIEW=new Map(), REVDIRTY=false;
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
@@ -855,11 +879,16 @@ function validate(b){
     }
   }
 
-  /* --- BH06-4 : do not report BH06 for a highway feature carried on another
-         bridge. Applies to the under-feature record, so we flag the bridges
-         where such a record exists. --- */
-  if(carriedTokens(b.FTR_INTRSC).length||/\b(HWY|HIGHWAY|RAMP|INTERSTATE|BL\b)/i.test(b.FTR_INTRSC||''))
-    flags.push('BH06_4_REDUNDANT');
+  /* --- BH06-4 is no longer decided here. It is an exclusion that applies to a
+         FEATURE, and which of its two conditions applies — B.F.02 says the
+         roadway is below, or B.H.18 says another structure carries it — changes
+         what a reviewer should do about it. Both now sit on the feature record
+         in validateFeature(). What stays on the structure row is the fact that
+         there ARE roadways beneath it, and that is read off the features rather
+         than guessed from a regex over the Feature Intersected text. --- */
+  if(b._feat&&b._feat.some(f=>f.loc==='B')) flags.push('HAS_UNDER_FEATURE');
+  if(b._twins&&b._twins.length) flags.push('TWIN_STRUCTURE');
+  if(b._struct) b._struct.forEach(x=>flags.push(x));
 
   /* --- BH07-1 : must be a valid numeric value --- */
   const n=mp3(mp);                       /* the value that will actually be reported */
@@ -918,7 +947,10 @@ function revalidate(){
     if(!r||r==='NA'||n===null) return;
     const k=r+'@'+n.toFixed(3); seen.set(k,(seen.get(k)||0)+1);});
   seen.forEach((v,k)=>{if(v>1) DUPES.add(k);});
-  ALL.forEach(validate);
+  /* Features first: the structure row's severity is the worst of its features,
+     and HAS_UNDER_FEATURE is read off the feature set rather than guessed at.
+     validate() then runs over the primary carried feature exactly as before. */
+  ALL.forEach(b=>{ validate(b); rollUpFeatures(b); validate(b); });
 }
 
 /* ==========================================================================
@@ -1269,6 +1301,7 @@ async function run(){
     /* a county already in memory answers this new scope with no request at all */
     $('snbibtn').classList.toggle('on',ALL.some(b=>b._snbi));
     $('fillnull').disabled=ALL.length===0;
+    $('expandfeat').disabled=ALL.length===0;
     $('csv').disabled=ALL.length===0;
     if(!ALL.length) toast('Nothing matched that query.',4000);
   }catch(e){ busy(false); toast('Query failed: '+e.message,6000); }
@@ -1352,9 +1385,19 @@ function reviewCounts(){
 }
 /* v1 files carried fix06/fix07 but nothing ever tested them — the tool validated
    NCDOT's published values and the corrections rode along untested. v2 means the
-   corrections are the values under test. The shape is identical, so both open
-   without conversion; the version only changes what we tell the reviewer. */
-const REVFILE_VERSION=2;
+   corrections are the values under test.
+
+   v3 adds features. A v1 or v2 entry is keyed on a bare bridge number, and what
+   a reviewer meant by that key was always the roadway carried on the structure —
+   there was nothing else to mean. So those entries map onto the primary carried
+   feature, and because that feature keeps the bare bridge number as its own key,
+   the mapping is the identity: no conversion step, and nothing to skip.
+
+   What cannot be mapped deterministically is a v1 correction on a structure that
+   now has more than one carried feature. "The BH06 for 590819" was unambiguous
+   when 590819 was a row; with I-85 northbound and southbound as separate
+   features it is a question. Those are reported, not guessed at. */
+const REVFILE_VERSION=3;
 
 function saveReview(){
   const out={tool:'NCDOT BH06/BH07 Validator',kind:'review-file',version:REVFILE_VERSION,
@@ -1394,6 +1437,27 @@ function openReview(text,merge){
   /* corrections in the file are values under test, so re-test before reflowing */
   if(ALL.length) revalidate();
   applyFilters();
+
+  /* What a bare bridge-number key cannot be placed onto. Reported rather than
+     resolved: a correction silently attached to the wrong roadway is worse than
+     one that is still waiting for a decision. */
+  const unmapped=[];
+  if(ALL.length) Object.keys(e).forEach(k=>{
+    if(k.includes('#')) return;                       /* already feature-keyed */
+    const b=ALL.find(x=>x.BRDG_NBR===k);
+    if(!b) return;                                    /* out of scope, not unmappable */
+    const v=e[k]; if(!v || (!v.fix06&&!v.fix07)) return;
+    const carried=featuresOf(b).filter(f=>f.loc==='C');
+    if(carried.length>1) unmapped.push({bn:k,why:carried.length+' carried features — '+
+      carried.map(f=>f.des+' '+(f.name||'')).join(', ')});
+  });
+  LASTIMPORT={unmapped, at:Date.now()};
+  if(unmapped.length){
+    toast(unmapped.length.toLocaleString()+' correction'+(unmapped.length===1?'':'s')+
+      ' from this file could not be placed on a single feature, because the structure now has '+
+      'more than one carried roadway. They are held against the primary carried feature and listed '+
+      'in Settings → Review file. Nothing was guessed.',14000);
+  }
   const c=reviewCounts();
   let fixes=0; REVIEW.forEach(r=>{ if((r.fix06&&String(r.fix06).trim())||(r.fix07&&String(r.fix07).trim())) fixes++; });
   const ver=Number(j.version||1);
@@ -1532,6 +1596,230 @@ function mAtPoint(paths,x,y){
   return best;
 }
 
+/* ==========================================================================
+   PARALLEL ADJACENT STRUCTURES vs GENUINE CROSSINGS
+   The bridge layer publishes structures as points, so every spatial test in
+   this tool is a buffer around a coordinate. Twin decks carrying opposing
+   directions of a divided facility sit 40 to 120 ft apart — comfortably inside
+   the 150 ft radius the resolver and the derive pass both use. Left alone, the
+   northbound structure's buffer returns the southbound structure's carried
+   route and admits a road running *alongside* the deck as though it ran
+   *beneath* it.
+
+   Measured on Mecklenburg alone: 122 pairs of structures within 250 ft whose
+   route IDs differ only in the inventory digit. This is the normal case at any
+   divided highway, not an edge case.
+
+   Three independent tests, all of which must pass. They fail differently on
+   purpose: the footprint is geometric, the skew comparison is about the
+   structure's own recorded shape, and the neighbour test needs no geometry at
+   all. A twin deck is caught by all three; something has to be very strange to
+   defeat all three at once.
+   ========================================================================== */
+
+/* Skew is measured from the PERPENDICULAR, so a road crossing a structure of
+   skew S meets the deck at (90 − S) degrees from the deck's own axis. That is
+   why there is no parallelism cutoff here: on a 70-degree skew a legitimate
+   crossing runs only 20 degrees off parallel, and any fixed threshold that
+   rejected it would throw away the most skewed structures in the state. What
+   is tested is AGREEMENT with the skew the inspector recorded. */
+const SKEW_TOL=25;            /* degrees of disagreement still treated as agreement */
+const SKEW_REVIEW=40;         /* beyond TOL but under this: admit to review, never silently */
+const TWIN_FT=250;            /* twin-pair clustering distance */
+const DECK_PAD_FT=8;          /* deck width tolerance — barrier, shoulder, coordinate slop */
+
+const expectedCrossing=skew=>90-Math.abs(Number(skew)||0);
+/* an undirected angle between two lines, folded into 0..90 */
+function foldDeg(d){ let x=Math.abs(d)%180; return x>90?180-x:x; }
+
+/* Principal-axis bearing of a polyline near a point. A least-squares direction
+   over the vertices in range, not the bearing of whichever segment happens to
+   be nearest — at an interchange the nearest segment can be a few feet of
+   curve that points nowhere useful. */
+function localBearing(paths,x,y,win){
+  win=win||250; const pts=[];
+  for(const p of paths) for(const v of p)
+    if(Math.hypot(v[0]-x,v[1]-y)<=win) pts.push(v);
+  if(pts.length<2) return null;
+  let mx=0,my=0; pts.forEach(p=>{mx+=p[0];my+=p[1];});
+  mx/=pts.length; my/=pts.length;
+  let sxx=0,syy=0,sxy=0;
+  pts.forEach(p=>{const dx=p[0]-mx,dy=p[1]-my; sxx+=dx*dx; syy+=dy*dy; sxy+=dx*dy;});
+  return 0.5*Math.atan2(2*sxy,sxx-syy);
+}
+
+/* The deck, as a rectangle rather than a circle: StructureLength along the
+   carried route's local bearing, BridgeDeckWidth across it. A twin deck 51 ft
+   away is outside a 45 ft deck; a road passing underneath runs through it. */
+function deckRect(cx,cy,ang,len,wid){
+  const ca=Math.cos(ang), sa=Math.sin(ang), hl=len/2, hw=wid/2;
+  return [[-hl,-hw],[hl,-hw],[hl,hw],[-hl,hw]]
+    .map(([dx,dy])=>[cx+ca*dx-sa*dy, cy+sa*dx+ca*dy]);
+}
+function ptInPoly(poly,pt){
+  let c=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[i], b=poly[j];
+    if((a[1]>pt[1])!==(b[1]>pt[1]) &&
+       pt[0] < (b[0]-a[0])*(pt[1]-a[1])/((b[1]-a[1])||1e-12)+a[0]) c=!c;
+  }
+  return c;
+}
+function segInt(p1,p2,p3,p4){
+  const d=(p2[0]-p1[0])*(p4[1]-p3[1])-(p2[1]-p1[1])*(p4[0]-p3[0]);
+  if(!d) return null;
+  const t=((p3[0]-p1[0])*(p4[1]-p3[1])-(p3[1]-p1[1])*(p4[0]-p3[0]))/d;
+  const u=((p3[0]-p1[0])*(p2[1]-p1[1])-(p3[1]-p1[1])*(p2[0]-p1[0]))/d;
+  return (t>=0&&t<=1&&u>=0&&u<=1)?[p1[0]+t*(p2[0]-p1[0]),p1[1]+t*(p2[1]-p1[1])]:null;
+}
+/* Does this route run through the deck, and at what bearing where it does? */
+function pathHitsPoly(poly,paths){
+  const edges=poly.map((p,i)=>[p,poly[(i+1)%poly.length]]);
+  for(const p of paths) for(let i=0;i<p.length-1;i++){
+    const a=p[i], b=p[i+1];
+    const br=Math.atan2(b[1]-a[1],b[0]-a[0]);
+    if(ptInPoly(poly,a)||ptInPoly(poly,b)) return {hit:true,pt:a,bearing:br};
+    for(const e of edges){ const ip=segInt(a,b,e[0],e[1]); if(ip) return {hit:true,pt:ip,bearing:br}; }
+  }
+  return {hit:false,pt:null,bearing:null};
+}
+
+/* Dimensions come from the SNBI join. Where they are missing we can still do
+   something, but we must not pretend it is the same answer. */
+function deckDims(b){
+  const s=b._snbi||{};
+  const len=Number(s.structure_length)||0, wid=Number(s.bridge_deck_width)||0;
+  const skew=(s.fed_skew==null||s.fed_skew==='')?null:Number(s.fed_skew);
+  return {len,wid,skew,have:len>0&&wid>0};
+}
+
+/* Twin pairs: same class, qualifier, number and county, different inventory
+   digit, within TWIN_FT. Recorded on both rows because the relationship is
+   symmetric, and shown in the drawer because an exclusion nobody can see is
+   indistinguishable from a feature that was never found. */
+function twinScan(){
+  const pts=ALL.filter(b=>b.LAT_DD&&b.LONG_DD&&/^\d{11}$/.test(effRid(b)));
+  const grid=new Map();
+  const cell=b=>Math.round(b.LAT_DD*1000)+'/'+Math.round(b.LONG_DD*1000);
+  pts.forEach(b=>{ const k=cell(b); if(!grid.has(k)) grid.set(k,[]); grid.get(k).push(b); });
+  const facility=r=>r.slice(0,2)+r.slice(3);        /* everything but the inventory digit */
+  const ftBetween=(a,b)=>{
+    const dy=(a.LAT_DD-b.LAT_DD)*364000;
+    const dx=(a.LONG_DD-b.LONG_DD)*364000*Math.cos(a.LAT_DD*Math.PI/180);
+    return Math.hypot(dx,dy);
+  };
+  ALL.forEach(b=>{ b._twins=[]; });
+  let n=0;
+  pts.forEach(b=>{
+    const r=effRid(b), la=Math.round(b.LAT_DD*1000), lo=Math.round(b.LONG_DD*1000);
+    for(let dla=-1;dla<=1;dla++) for(let dlo=-1;dlo<=1;dlo++){
+      (grid.get((la+dla)+'/'+(lo+dlo))||[]).forEach(o=>{
+        if(o===b) return;
+        const ro=effRid(o);
+        if(facility(ro)!==facility(r)||ro[2]===r[2]) return;
+        const d=ftBetween(b,o);
+        if(d>TWIN_FT) return;
+        if(!b._twins.some(t=>t.bn===o.BRDG_NBR)){ b._twins.push({bn:o.BRDG_NBR,ft:Math.round(d),rid:ro}); n++; }
+      });
+    }
+  });
+  return n/2;
+}
+
+/* Is this candidate route carried by some OTHER structure nearby? If it is,
+   the route belongs to that structure and is not a feature of this one — at
+   any separation, including one foot. This test needs no geometry at all,
+   which is why it is the one that holds up when the dimensions are missing. */
+function neighbourCarrying(b,rid){
+  const la=b.LAT_DD, lo=b.LONG_DD;
+  for(const o of ALL){
+    if(o===b||!o.LAT_DD) continue;
+    const dy=(la-o.LAT_DD)*364000, dx=(lo-o.LONG_DD)*364000*Math.cos(la*Math.PI/180);
+    if(Math.hypot(dx,dy)>TWIN_FT) continue;
+    if(effRid(o)===rid) return o.BRDG_NBR;
+    const d=decodeRID(rid);
+    if(d&&carriedTokens(o.F_CARRIED).includes(d.label)) return o.BRDG_NBR;
+  }
+  return null;
+}
+
+/* The verdict on one candidate route at one structure.
+     under    — crosses the deck at the angle the recorded skew predicts
+     carried  — runs along the deck, inside the footprint, and no neighbouring
+                structure claims it: a second roadway on the same superstructure
+     review   — plausible but the evidence disagrees or is missing
+     reject   — a neighbour carries it, or it never touches the deck
+   The "carried" verdict is the distinction Prompt 9a turns on. 590819 carries
+   I-85 both ways on one 156 ft deck: the southbound route is parallel AND
+   inside the footprint AND carried by nobody else. A sister pair fails the
+   second and third of those. */
+function classifyCandidate(b,rid,paths,ctx){
+  const out={rid,angle:null,expected:null,footprint:null,neighbour:null,
+             verdict:'reject',why:'',admittedBy:null,confidence:'high'};
+  const nb=neighbourCarrying(b,rid);
+  if(nb&&rid!==effRid(b)){
+    out.neighbour=nb;
+    out.why='Carried on structure '+nb+' — it belongs to that structure, not this one.';
+    return out;
+  }
+  const hit=pathHitsPoly(ctx.poly,paths);
+  out.footprint=hit.hit;
+  const br=hit.bearing!=null?hit.bearing:localBearing(paths,ctx.cx,ctx.cy);
+  if(br==null){ out.why='No usable geometry for this route near the structure.'; return out; }
+  out.angle=Math.round(foldDeg((br-ctx.ang)*180/Math.PI)*10)/10;
+
+  if(!hit.hit){
+    out.why=ctx.have
+      ? 'Does not cross the deck footprint ('+ctx.len+' × '+ctx.wid+' ft) — it passes alongside, not beneath.'
+      : 'Outside the search radius.';
+    return out;
+  }
+  if(ctx.skew==null){
+    out.verdict='review'; out.confidence='low'; out.admittedBy='footprint only (no skew recorded)';
+    out.why='Crosses the deck, but the structure records no skew, so the crossing angle cannot be checked against anything.';
+    return out;
+  }
+  out.expected=expectedCrossing(ctx.skew);
+  const delta=Math.abs(out.angle-out.expected);
+  if(delta<=SKEW_TOL){
+    out.verdict='under';
+    out.admittedBy=ctx.have?'footprint + skew':'buffer fallback + skew';
+    out.confidence=ctx.have?'high':'low';
+    out.why='Crosses the deck at '+out.angle+'°, and a skew of '+ctx.skew+'° predicts '+out.expected+'°.';
+    return out;
+  }
+  /* Parallel, inside the footprint, and unclaimed: another roadway on this deck. */
+  if(out.angle<=SKEW_TOL){
+    out.verdict='carried';
+    out.admittedBy=ctx.have?'footprint + parallel + unclaimed':'buffer fallback';
+    out.confidence=ctx.have?'medium':'low';
+    out.why='Runs along the deck at '+out.angle+'° and no neighbouring structure carries it — a second roadway on this superstructure, not a road beneath it.';
+    return out;
+  }
+  if(delta<=SKEW_REVIEW){
+    out.verdict='review'; out.confidence='low'; out.admittedBy='footprint, skew disagrees';
+    out.why='Crosses at '+out.angle+'° where the recorded skew of '+ctx.skew+'° predicts '+out.expected+'°. Close enough to look at, not close enough to accept.';
+    return out;
+  }
+  out.why='Crosses at '+out.angle+'° against a predicted '+out.expected+'° — the recorded skew says this is not how a road crosses this deck.';
+  return out;
+}
+
+/* Everything a classification needs about the structure itself, built once. */
+function deckContext(b,carriedPaths){
+  const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
+  const dim=deckDims(b);
+  const ang=localBearing(carriedPaths,sp.x,sp.y);
+  const ctx={cx:sp.x,cy:sp.y,ang:ang==null?0:ang,skew:dim.skew,have:dim.have&&ang!=null,
+             len:dim.len,wid:dim.wid};
+  ctx.poly = ctx.have
+    ? deckRect(sp.x,sp.y,ctx.ang,dim.len,dim.wid+DECK_PAD_FT)
+    /* No dimensions, or no carried geometry to orient against: fall back to the
+       old buffer, as a square, and mark everything it admits low-confidence. */
+    : deckRect(sp.x,sp.y,0,300,300);
+  return ctx;
+}
+
 async function resolveCarried(){
   const targets=ALL.filter(b=>b._flags.includes('CONCURRENCY')&&b.LAT_DD&&b.LONG_DD);
   if(!targets.length){ toast('No bridges flagged "BH06 not a carried route" in this scope.',4500); return; }
@@ -1539,7 +1827,7 @@ async function resolveCarried(){
      'Roughly '+Math.ceil(targets.length*0.55/60)+' minutes. Continue?')) return;
 
   busy(true,'Resolving carried route','0 / '+targets.length,1);
-  let solved=0, ambiguous=0, none=0, stale=0;
+  let solved=0, ambiguous=0, none=0, stale=0, twinRuled=0;
   for(let i=0;i<targets.length;i++){
     const b=targets[i];
     b._fix=null;
@@ -1559,8 +1847,30 @@ async function resolveCarried(){
         });
       });
       const toks=carriedTokens(b.F_CARRIED);
-      const hits=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
+      let hits=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
       const codedPresent=cand.has((b._rid||'').trim());
+
+      /* --- the Prompt 9a guard, applied here because this pass has always been
+         exposed to it. On a twin pair the Feature Carried text matches BOTH
+         carriageways — "NC51 SBL" tokenises to NC51, and so does the sister
+         structure's route — and the inventory-digit preference below would then
+         hand the reviewer the TWIN's route as a suggested correction. Measured
+         in Mecklenburg that is 122 pairs of structures. --- */
+      const orient = cand.get((b._rid||'').trim()) || cand.get(hits[0]);
+      const ctx = deckContext(b, (orient&&orient.paths)||[]);
+      const ruled=[];
+      hits = hits.filter(r=>{
+        const v=classifyCandidate(b,r,(cand.get(r)||{}).paths||[],ctx);
+        if(v.neighbour){ ruled.push({rid:r,why:v.why,bn:v.neighbour}); return false; }
+        return true;
+      });
+      if(!hits.length&&ruled.length){
+        /* Every route the description named turned out to belong to a neighbour.
+           That is an answer, not a failure — and a far more useful one than the
+           wrong correction this used to offer. */
+        b._fix={verdict:'twin', rid:null, mp:null, cands:cand.size, ruled};
+        twinRuled++; continue;
+      }
 
       if(!hits.length){
         /* The route named in Feature Carried is not at this bridge. If the route
@@ -1597,6 +1907,7 @@ async function resolveCarried(){
   toast('Triaged '+targets.length.toLocaleString()+' flagged bridges — '+
     solved.toLocaleString()+' resolved to the carried route'+(ambiguous?' ('+ambiguous+' ambiguous)':'')+', '+
     stale.toLocaleString()+' where the coded route IS at the bridge so the Feature Carried text is stale, '+
+    (twinRuled?twinRuled.toLocaleString()+' where every candidate belongs to a sister structure alongside, ':'')+
     none.toLocaleString()+' where neither route is there and a human is needed. Review before applying anything.',13000);
 }
 
@@ -1678,11 +1989,43 @@ async function deriveMissing(){
 
       const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
       const toks=carriedTokens(b.F_CARRIED);
-      const matched=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
+      let matched=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
+
+      /* --- the Prompt 9a guard. This pass is inventing a value where NCDOT has
+         none, so handing it a sister structure's route would put a fabricated
+         number into an export with nothing to contradict it. Anything a
+         neighbouring structure carries is removed before the preference order
+         below gets to choose. --- */
+      const ctxD=deckContext(b,(cand.get(matched[0])||cand.get([...cand.keys()][0])||[]));
+      const ruledOut=[];
+      matched=matched.filter(r=>{
+        const nb=neighbourCarrying(b,r);
+        if(nb){ ruledOut.push({rid:r,bn:nb}); return false; }
+        return true;
+      });
       matched.sort((x,y)=>(x[2]==='0'?0:1)-(y[2]==='0'?0:1));
 
       let rid=null, conf='low', how='';
-      if(matched.length){ rid=matched[0]; conf='high'; how='matched the route named in Feature Carried'; }
+      if(matched.length){
+        rid=matched[0];
+        const v=classifyCandidate(b,rid,cand.get(rid)||[],ctxD);
+        /* A route that matches the description AND runs along this deck is the
+           carried route. One that matches the description but crosses the deck
+           at the recorded skew is the road underneath wearing the same number,
+           and must not be presented as fact. */
+        conf = (v.verdict==='carried'||v.verdict==='reject'&&!v.footprint) ? 'high'
+             : v.verdict==='under' ? 'low' : 'medium';
+        how = v.verdict==='under'
+          ? 'matched the route named in Feature Carried, but it CROSSES this deck at '+v.angle+
+            '° — the recorded skew says that is the road underneath, not the road carried'
+          : 'matched the route named in Feature Carried';
+      }
+      else if(ruledOut.length){
+        conf='low';
+        how='every route named in Feature Carried is carried by a neighbouring structure ('+
+            ruledOut.map(x=>x.rid+' on '+x.bn).join(', ')+') — this is one of a sister pair and '+
+            'its own route is not in the road network here';
+      }
       else if(!toks.length){ conf='medium'; how='Feature Carried names no route number (a local street), nearest carried route used'; }
       else{ conf='low'; how='Feature Carried names '+toks.join('/')+' but no candidate matched — this may be the road underneath'; }
       if(!rid){
@@ -1728,6 +2071,282 @@ async function deriveMissing(){
     skipped.toLocaleString()+' need no BH06 at all (not a highway carried on the structure)'+
     (none?', '+none.toLocaleString()+' had no route within 150 ft':'')+
     '. Notes are filled in. Export the NCDOT table when you are happy with it.',16000);
+}
+
+/* ==========================================================================
+   FEATURE-LEVEL RECORDS
+   A structure is not a row of BH06/BH07. It is a set of FEATURES — one per
+   roadway — each of which has its own BH06 and BH07, its own findings and its
+   own review. Bridge 590819 carries I-85 in both directions on one 156 ft deck
+   and has three roadways beneath it: five features, five sets of values, one
+   bridge number.
+
+   Three levels, and the middle one is what makes the arithmetic come out:
+
+     FEATURE  (B.F)   a roadway. B.F.01 designation, B.F.02 C carried / B below
+       ROUTE  (B.RT)  a designation signed on that roadway. Restarts at R01
+       HIGHWAY(B.H)   BH06 / BH07 — ONE pair per feature, never per route
+
+   Concurrency lives at the ROUTE level. I-77 and US-21 co-signed on one deck
+   are two route records under one feature and therefore one BH06/BH07 pair.
+   Put them at the feature level instead and the state reports the same deck
+   twice. That was true before this refactor and the refactor must not undo it,
+   so it is asserted rather than assumed.
+
+   The bridge number stays the search key and the table row. Reviewers look for
+   structures; they review features.
+   ========================================================================== */
+
+/* The carried primary feature keeps the bare bridge number as its review key.
+   That is deliberate rather than tidy: every v1 review file in a reviewer's
+   possession is keyed on bridge number alone and means exactly that feature,
+   so the compatibility is structural instead of a conversion step that could
+   be skipped. */
+function fkey(b,f){ return (f.primary&&f.loc==='C') ? b.BRDG_NBR : b.BRDG_NBR+'#'+f.des; }
+/* The one feature that IS the table row: the carried roadway NCDOT's bridge
+   layer describes. Its values are b.RTE_ID / b.MP and validate() has always
+   tested them, so it keeps doing that. A carried feature whose values came from
+   somewhere else — an inspection report, a submittal file — is a feature like
+   any other and gets tested like one. */
+const isRowFeature=f=>f.primary&&f.loc==='C'&&f.origin==='published inventory';
+const padH=n=>'H'+String(n).padStart(2,'0');
+const padR=n=>'R'+String(n).padStart(2,'0');
+
+function effRidF(b,f){
+  if(isRowFeature(f)) return effRid(b);
+  const r=REVIEW.get(fkey(b,f));
+  const x=r&&r.fix06!=null?String(r.fix06).trim():'';
+  return x||String(f.rid==null?'':f.rid).trim();
+}
+function effMpF(b,f){
+  if(isRowFeature(f)) return effMp(b);
+  const r=REVIEW.get(fkey(b,f));
+  const x=r&&r.fix07!=null?String(r.fix07).trim():'';
+  if(x!=='') return x;
+  return (f.mp==null||f.mp==='')?null:f.mp;
+}
+
+/* B.RT records for one feature. Feature Carried names every designation signed
+   on the roadway — "I77 NBL, US21 NBL" is one deck with two numbers on it — so
+   the split happens here, at the route level, and never produces a feature. */
+function routesFor(name,rid){
+  const parts=String(name||'').split(/\s*[,;/]\s*|\s+AND\s+/i).map(s=>s.trim()).filter(Boolean);
+  const seen=[], out=[];
+  parts.forEach(p=>{
+    const t=carriedTokens(p)[0]||p;
+    if(seen.includes(t)) return;
+    seen.push(t);
+    const dir=(/\bN(B|BL)?\b|NORTH/i.test(p)?'NB':/\bS(B|BL)?\b|SOUTH/i.test(p)?'SB':
+               /\bE(B|BL)?\b|EAST/i.test(p)?'EB':/\bW(B|BL)?\b|WEST/i.test(p)?'WB':'');
+    out.push({des:padR(out.length+1),num:p,dir,lrs:out.length===0?(rid||null):null});
+  });
+  if(!out.length) out.push({des:'R01',num:name||'',dir:'',lrs:rid||null});
+  return out;
+}
+
+/* The crosswalk order: every carried feature, then the primary below feature,
+   then the remaining below features. Applied after any derivation, so a newly
+   found roadway lands in the right place rather than on the end. */
+function renumberFeatures(list){
+  const rank=f=>(f.loc==='C'?0:1)*100+(f.primary?0:1)*10;
+  /* "Remaining below features sequentially" leaves the order open, and the order
+     a spatial query happened to return them in is not a useful one. Mainlines
+     before ramps: a reviewer reading down the list meets I-485 before the loop
+     ramps that serve it. */
+  const cls=f=>{ const r=String(f.rid||''); return /^\d{11}$/.test(r)?Number(r[0]):9; };
+  list.sort((a,b)=>(rank(a)-rank(b))||(cls(a)-cls(b))||
+                   String(a.rid||'').localeCompare(String(b.rid||''))||((a._ord||0)-(b._ord||0)));
+  list.forEach((f,i)=>{ f.des=padH(i+1); f.seq=i+1; });
+  return list;
+}
+
+/* What the published inventory alone can tell us: one carried roadway. */
+function baseFeatures(b){
+  const f={des:'H01',seq:1,loc:'C',primary:true,name:b.F_CARRIED||'',
+           rid:b.RTE_ID,mp:b.MP,origin:'published inventory',_ord:0,
+           routes:routesFor(b.F_CARRIED,b.RTE_ID)};
+  return [f];
+}
+function featuresOf(b){ if(!b._feat) b._feat=baseFeatures(b); return b._feat; }
+
+/* ---- per-feature validation ----------------------------------------------
+   The carried primary feature is validated by validate() exactly as it always
+   was, so the table row and every existing check are untouched. This runs the
+   same rules over the other features, plus the two that only exist once
+   features do. */
+function validateFeature(b,f){
+  if(isRowFeature(f)){
+    /* Structure-level findings stay on the structure. Repeating them inside the
+       feature card would say the bridge has roadways beneath it on the card for
+       the roadway on top of it. */
+    const STRUCTONLY=['HAS_UNDER_FEATURE','TWIN_STRUCTURE','FEATURE_ORDER',
+                      'ROUTE_DESIGNATION_CONTINUOUS','CONCURRENCY_SPLIT'];
+    f.flags=b._flags.filter(x=>!STRUCTONLY.includes(x)); f.sev=b._sev; f.rid=b.RTE_ID; f.mp=b.MP;
+    /* BH06-4 by B.H.18: the value belongs to whichever structure carries it. */
+    if(f.onBridge){ f.flags=f.flags.concat(['BH06_4_ONBRIDGE']); f.sev='e'; }
+    return f;
+  }
+  const flags=[], rid=effRidF(b,f), mp=effMpF(b,f), n=mp3(mp), d=decodeRID(rid);
+  f._rid=rid; f._mp3=n;
+  f.src=(REVIEW.get(fkey(b,f))||{}).fix06!=null||(REVIEW.get(fkey(b,f))||{}).fix07!=null
+        ?'REVIEWED':(f.origin==='published inventory'?'PUBLISHED':'DERIVED');
+
+  if(f.loc==='B'){
+    /* BH06-4, first condition: B.F.02 = B. A road passing beneath is a feature
+       of this structure and gets a highway record, but BH06 is not reported for
+       it at all. A value here is a finding about this feature, on this feature,
+       not an aside on the bridge row. */
+    if(rid&&rid!=='NA') flags.push('BH06_4_BELOW');
+  }else{
+    if(!rid||rid==='NA') flags.push('BH06_1_NULL');
+    /* BH06-4, second condition: B.H.18 names another structure as the one
+       carrying this feature. Different condition, different remedy — which is
+       why it is a different finding. */
+    if(f.onBridge) flags.push('BH06_4_ONBRIDGE');
+  }
+  if(rid&&rid!=='NA'){
+    if(rid.length>120) flags.push('BH06_1_LEN');
+    if(HPMS.size&&!HPMS.has(rid)&&f.loc==='C') flags.push('BH06_3_HPMS');
+    if(!/^\d{11}$/.test(rid)) flags.push('BAD_FORMAT');
+    else{
+      if(['4','6','9'].includes(rid[2])) flags.push('NON_INV');
+      if(rid[0]==='5') flags.push('NON_SYS');
+      if(rid[0]==='8') flags.push('RAMP');
+      const myCode=COUNTIES[b.COUNTY];
+      if(myCode&&rid.slice(8)!==myCode) flags.push('CNTY_MISMATCH');
+    }
+  }
+  if(n===null){ if(f.loc==='C') flags.push('BH07_1_NUM'); }
+  else{
+    if(n.toFixed(3).replace(/[^0-9]/g,'').length>8) flags.push('BH07_2_LEN');
+    if(n===0) flags.push('MP_ZERO');
+    else{ const s=String(mp), dec=s.includes('.')?s.split('.')[1].length:0;
+          if(dec<3) flags.push('PRECISION'); }
+    const rl=ROUTELEN[rid];
+    if(rl){ if(n>rl.max+0.01) flags.push('MP_BEYOND'); else if(n<rl.min-0.01) flags.push('MP_BEFORE'); }
+    if(f.off!=null&&f.off>TOLFT) flags.push('MP_OFFSET');
+    const hx=HPMS.get?HPMS.get(rid):null;
+    if(hx&&hx.mn!=null&&hx.mx!=null&&!(n>=hx.mn-0.02&&n<=hx.mx+0.02)) flags.push('HPMS_MP_OUT');
+    /* DUPLICATE_PAIR is deliberately NOT tested here. A road passing beneath a
+       twin pair is genuinely an intersected feature of both structures, and two
+       structures reporting the same road below is correct. The duplicate test
+       stays on carried values, where two structures on one point of one route
+       really is impossible. */
+  }
+  if(/^\d{11}$/.test(rid)&&ROUTEASKED.has(rid)&&!ROUTELEN[rid]) flags.push('ROUTE_NOT_FOUND');
+  if(f.src==='REVIEWED') flags.push('REVIEWED_VALUE');
+  if(f.confidence==='low') flags.push('FEATURE_LOW_CONF');
+
+  f.flags=flags; f._dec=d;
+  f.sev=flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='e')?'e'
+       :flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='w')?'w'
+       :flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='i')?'i':'ok';
+  return f;
+}
+
+/* The structure's own severity is the worst of its features. A clean carried
+   value on a structure whose under-feature is wrong is not a clean structure. */
+const SEVRANK={ok:0,i:1,w:2,e:3}, RANKSEV=['ok','i','w','e'];
+
+/* Findings about the SHAPE of the feature set rather than about any one value.
+   Two of the three can only fire on a feature set that came from somewhere else
+   — we number our own correctly — which is the point: they are how a submittal
+   or an inspection report gets checked against the crosswalk instead of being
+   copied. The third fires on anything. */
+function checkFeatureStructure(b){
+  const fs=featuresOf(b), out=[];
+  const firstBelow=fs.filter(f=>f.loc==='B').map(f=>f.reportedDes||f.des).sort()[0];
+  if(firstBelow&&fs.some(f=>f.loc==='C'&&(f.reportedDes||f.des)>firstBelow)) out.push('FEATURE_ORDER');
+  if(fs.some(f=>(f.routes||[]).some(r=>r.reportedDes&&r.reportedDes!==r.des))) out.push('ROUTE_DESIGNATION_CONTINUOUS');
+  const seen=new Map();
+  fs.forEach(f=>{
+    /* Any non-empty value, not only a well-formed one: two features in the same
+       location reporting the identical BH06 is one roadway split in two, and a
+       report that writes it badly has still split it. */
+    const rid=effRidF(b,f); if(!rid||rid==='NA') return;
+    const k=f.loc+'|'+rid;
+    if(seen.has(k)&&!out.includes('CONCURRENCY_SPLIT')) out.push('CONCURRENCY_SPLIT');
+    seen.set(k,f);
+  });
+  b._struct=out;
+  return out;
+}
+
+function rollUpFeatures(b){
+  const fs=featuresOf(b);
+  fs.forEach(f=>validateFeature(b,f));
+  checkFeatureStructure(b);
+  b._featSev=RANKSEV[Math.max(...fs.map(f=>SEVRANK[f.sev||'ok']))];
+  b._nfeat=fs.length;
+  b._nunder=fs.filter(f=>f.loc==='B').length;
+  return b;
+}
+
+/* ---- derivation, under the Prompt 9a guard -------------------------------
+   Everything the published submittal cannot supply. NCDOT's prior submittal
+   holds no intersected features at all, so they have to be found in the road
+   network — which is exactly the operation the twin-deck problem attacks. */
+async function deriveFeatures(scope){
+  const targets=(scope||ALL).filter(b=>b.LAT_DD&&b.LONG_DD);
+  if(!targets.length){ toast('Nothing in scope to expand.',4000); return; }
+  if(targets.length>400&&!confirm(targets.length.toLocaleString()+' structures, one spatial query each. '+
+     'Roughly '+Math.ceil(targets.length*0.6/60)+' minutes. Continue?')) return;
+  busy(true,'Expanding features','0 / '+targets.length,1);
+  twinScan();
+  let nUnder=0, nCarried=0, nReview=0, nRuled=0, nLow=0;
+  for(let i=0;i<targets.length;i++){
+    const b=targets[i];
+    try{
+      const j=await esriQuery(ROADCHAR,{
+        geometry:b.LONG_DD+','+b.LAT_DD, geometryType:'esriGeometryPoint', inSR:'4326',
+        distance:'300', units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
+        outFields:'RouteID,RouteName,StreetName,Direction',
+        returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:400});
+      const cand=new Map();
+      (j.features||[]).forEach(f=>{
+        const a=f.attributes, r=a.RouteID;
+        if(!r||!/^\d{11}$/.test(r)) return;
+        if(!cand.has(r)) cand.set(r,{paths:[],name:a.RouteName,street:a.StreetName,dir:a.Direction});
+        ((f.geometry&&f.geometry.paths)||[]).forEach(p=>cand.get(r).paths.push(p));
+      });
+      const own=effRid(b);
+      const ctx=deckContext(b,(cand.get(own)||{}).paths||[]);
+      const list=baseFeatures(b);
+      let ord=1;
+      cand.forEach((v,rid)=>{
+        if(rid===own) return;
+        const cl=classifyCandidate(b,rid,v.paths,ctx);
+        if(cl.verdict==='reject'){ if(cl.neighbour) nRuled++; return; }
+        const m=mAtPoint(v.paths,ctx.cx,ctx.cy);
+        const f={des:'', loc:cl.verdict==='carried'?'C':'B', primary:false,
+                 name:v.street||v.name||'', rid, mp:m&&m.m!=null?Math.round(m.m*1000)/1000:null,
+                 off:m?m.d:null, origin:'derived: '+(cl.admittedBy||''),
+                 confidence:cl.confidence, angle:cl.angle, expected:cl.expected,
+                 why:cl.why, needsReview:cl.verdict==='review', _ord:++ord,
+                 routes:routesFor(v.name||v.street||'',rid)};
+        list.push(f);
+        if(cl.verdict==='under') nUnder++; else if(cl.verdict==='carried') nCarried++;
+        if(cl.verdict==='review') nReview++;
+        if(cl.confidence==='low') nLow++;
+      });
+      /* The primary below feature is the widest-carrying road beneath — in
+         practice the one the inspector named in Feature Intersected. */
+      const toks=carriedTokens(b.FTR_INTRSC);
+      const below=list.filter(f=>f.loc==='B');
+      const named=below.find(f=>{const d=decodeRID(f.rid); return d&&toks.includes(d.label);});
+      (named||below[0]||{}).primary=true;
+      b._feat=renumberFeatures(list);
+      rollUpFeatures(b);
+    }catch(e){ /* leave the published feature standing */ }
+    if(i%5===0) busy(true,'Expanding features',(i+1)+' / '+targets.length,(i+1)/targets.length*100);
+  }
+  applyFilters(); if(SEL) drawDetail(ALL.find(x=>x.BRDG_NBR===SEL));
+  busy(false);
+  toast('Expanded '+targets.length.toLocaleString()+' structures — '+nUnder.toLocaleString()+
+    ' roadways beneath, '+nCarried.toLocaleString()+' additional roadways carried on the same deck, '+
+    nReview.toLocaleString()+' needing a look'+(nLow?' ('+nLow+' low confidence)':'')+
+    (nRuled?', '+nRuled.toLocaleString()+' candidates ruled out as belonging to a neighbouring structure':'')+
+    '. NCDOT publishes none of these; they are measured, so check them.',15000);
 }
 
 /* ---- the table NCDOT can load straight into their database ---- */
@@ -2109,6 +2728,79 @@ function findBlock(b,f,showCode){
             'Leave a note below saying why you think it is not a problem.</div>'))+
     '</div>';
 }
+/* ---- the feature list, beneath the structure --------------------------------
+   The bridge number is what a reviewer searched for and what the table row
+   shows. What they actually review is here: every roadway on and under this
+   structure, each with its own BH06, BH07 and findings. The values above are
+   this structure's primary carried feature — the one NCDOT's bridge layer can
+   describe — and it appears in the list too so the set is complete rather than
+   split between two places. */
+function featurePanel(b){
+  const fs=featuresOf(b);
+  const twins=(b._twins||[]);
+  let h='<div class="dr-sec">Features'+
+    '<span style="float:right;font-weight:400;letter-spacing:0;text-transform:none;color:#5A5A5A">'+
+    fs.filter(f=>f.loc==='C').length+' carried &middot; '+fs.filter(f=>f.loc==='B').length+' below</span></div>';
+
+  if(twins.length){
+    h+='<div class="find" style="border-left-color:#1E56B3;background:#EAF0FA"><b>One of a sister pair</b>'+
+      twins.map(t=>'Bridge <b>'+esc(t.bn)+'</b> sits '+t.ft+' ft away carrying '+esc(t.rid)+
+      ' — the opposing direction of the same facility.').join(' ')+
+      ' Each has its own deck, so neither is a feature of the other. Routes carried on '+
+      twins.map(t=>esc(t.bn)).join(' or ')+' are excluded from this structure’s features on purpose.</div>';
+  }
+  if(fs.length===1&&!fs[0].origin.startsWith('derived')){
+    h+='<div class="find" style="border-left-color:#9A9A9A;background:#F4F4F4"><b>Only the published feature</b>'+
+      'NCDOT’s submittal holds no intersected features, so nothing below this structure is known yet. '+
+      'Run <b>Expand features</b> to measure them against the road network.</div>';
+  }
+  fs.forEach(f=>{
+    const rid=effRidF(b,f), n=mp3(effMpF(b,f)), d=decodeRID(rid);
+    const rv=REVIEW.get(fkey(b,f))||{};
+    const isPrim=f.primary&&f.loc==='C';
+    const col=SEVCOL[f.sev||'ok'];
+    h+='<div class="find" style="border-left-color:'+col+';background:#FAFAFA">'+
+      '<b>'+esc(f.des)+' &middot; '+(f.loc==='C'?'Carried on bridge':'Below bridge')+
+        (f.primary?' &middot; primary':'')+'</b>'+
+      '<div style="font-size:12.5px;margin-bottom:5px">'+esc(f.name||'—')+'</div>'+
+      '<dl class="kv" style="grid-template-columns:78px 1fr;margin:0 0 5px 0">'+
+        '<dt>BH06</dt><dd class="mono">'+
+          (f.loc==='B'
+            ? (rid&&rid!=='NA'? '<span style="color:#CF3910">'+esc(rid)+'</span> — not reported for a feature below the bridge'
+                              : '<span style="color:#5A5A5A">not reported (B.F.02 = B)</span>')
+            : (rid&&rid!=='NA'? esc(rid)+((rv.fix06!=null&&String(rv.fix06).trim()!=='')?SRCTAG:'')
+                              : '<span style="color:#CF3910">not assigned</span>'))+
+          (d?'<div style="color:#5A5A5A;font-size:11.5px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
+        '</dd>'+
+        '<dt>BH07</dt><dd class="mono">'+(n===null?'<span style="color:#CF3910">not assigned</span>'
+            :n.toFixed(3)+((rv.fix07!=null&&String(rv.fix07).trim()!=='')?SRCTAG:''))+
+          (f.off!=null?'<div style="color:'+(f.off>TOLFT?'#CF3910':'#2E7D32')+';font-size:11.5px">'+
+            Math.round(f.off).toLocaleString()+' ft from the structure</div>':'')+'</dd>'+
+        '<dt>Routes</dt><dd>'+(f.routes||[]).map(r=>'<span class="mono">'+esc(r.des)+'</span> '+
+            esc(r.num||'—')+(r.dir?' · '+esc(r.dir):'')+
+            (r.reportedDes&&r.reportedDes!==r.des?' <span style="color:#C9A227">(the report called this '+esc(r.reportedDes)+')</span>':''))
+            .join('<br>')+'</dd>'+
+      '</dl>'+
+      (f.why?'<div style="font-size:11.5px;color:#5A5A5A;margin-bottom:5px">'+esc(f.why)+
+        (f.confidence?' <b>'+esc(f.confidence)+' confidence</b>':'')+'</div>':'')+
+      ((f.flags||[]).length
+        ? '<div style="font-size:11.5px">'+f.flags.filter(x=>RULEMAP[x]).map(x=>
+            '<span style="display:inline-block;margin:1px 4px 1px 0;padding:1px 6px;border-radius:9px;'+
+            'background:'+SEVCOL[RULEMAP[x].sev]+'22;color:'+SEVCOL[RULEMAP[x].sev]+'">'+
+            esc(RULEMAP[x].t)+'</span>').join('')+'</div>'
+        : '<div style="font-size:11.5px;color:#2E7D32">No findings on this feature.</div>')+
+      (isPrim
+        ? '<div style="font-size:11.5px;color:#9A9A9A;margin-top:5px">Corrections for this feature go in the box at the top of the panel.</div>'
+        : '<div class="revrow" style="margin-top:6px">'+
+            '<input type="text" class="fx06" data-des="'+esc(f.des)+'" placeholder="Corrected BH06" value="'+
+              esc(rv.fix06||'')+'" style="flex:1.4">'+
+            '<input type="text" class="fx07" data-des="'+esc(f.des)+'" placeholder="Corrected BH07" value="'+
+              esc(rv.fix07||'')+'" style="flex:1"></div>')+
+    '</div>';
+  });
+  return h;
+}
+
 function drawDetail(b){
   /* rid/mp here are the values UNDER TEST. pubRid/pubMp are what NCDOT
      publishes. When they differ both are shown — the tested value primary, the
@@ -2172,6 +2864,8 @@ function drawDetail(b){
          '<b>Needs re-measuring.</b> Locate measured a distance for the previous value; the value has '+
          'changed since, so that distance no longer applies. Run <b>Locate</b> again to test this one.</div>'
        :'')+'</div>';
+
+  h+=featurePanel(b);
 
   const ff=b._flags.filter(f=>RULEMAP[f].grp==='fhwa'), qf=b._flags.filter(f=>RULEMAP[f].grp==='qc'),
         nf=b._flags.filter(f=>RULEMAP[f].grp==='note');
@@ -2286,6 +2980,20 @@ function drawDetail(b){
     revalidate(); applyFilters(); drawDetail(ALL.find(x=>x.BRDG_NBR===bn)||b); };
   if(f6) f6.onchange=()=>applyFix('fix06',f6);
   if(f7) f7.onchange=()=>applyFix('fix07',f7);
+  /* Corrections on the other features. Same rule as the primary one: the value
+     is re-tested the moment it changes, so a correction that is itself wrong
+     fails in front of the person who typed it. */
+  $('dr-body').querySelectorAll('input.fx06,input.fx07').forEach(el=>{
+    el.onchange=()=>{
+      const bb=ALL.find(x=>x.BRDG_NBR===bn)||b;
+      const f=featuresOf(bb).find(x=>x.des===el.dataset.des);
+      if(!f) return;
+      const k=fkey(bb,f);
+      rec(k,true)[el.classList.contains('fx06')?'fix06':'fix07']=el.value.trim();
+      const r=rec(k,true); r.des=f.des; r.loc=f.loc; r.name=f.name;
+      touch(k); revalidate(); applyFilters(); drawDetail(bb);
+    };
+  });
   const take=$('rv-take');
   if(take) take.onclick=e=>{ e.preventDefault();
     const r=rec(bn,true); r.fix06=b._fix.rid; r.fix07=b._fix.mp.toFixed(3);
@@ -2535,6 +3243,21 @@ function loadHPMS(text){
 /* Reference data is loaded on a schedule, so what matters here is not "what is
    cached" but "how old is what I am looking at" — which is the question an
    export has to answer anyway. */
+/* What the last review-file import could not place. Kept visible rather than
+   announced once in a toast that scrolls away. */
+function renderUnmapped(){
+  const el=$('unmapped'); if(!el) return;
+  const u=LASTIMPORT.unmapped||[];
+  if(!u.length){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML='<div class="find w" style="margin-top:8px"><b>'+u.length+
+    ' correction'+(u.length===1?'':'s')+' could not be placed on one feature</b>'+
+    'These came from a file keyed on bridge number alone, and the structure now has more than one '+
+    'carried roadway. They are held against the primary carried feature and are still validated there; '+
+    'move them onto the right feature in the bridge panel.<div class="mono" style="margin-top:5px;font-size:11.5px">'+
+    u.map(x=>esc(x.bn)+' — '+esc(x.why)).join('<br>')+'</div></div>';
+}
+
 async function updateCacheState(){
   const el=$('cachestate'); if(!el) return;
   el.textContent='reading…';
@@ -2596,7 +3319,7 @@ $('resolve').onclick=resolveCarried;
 $('fillnull').onclick=deriveMissing;
 $('ncdotcsv').onclick=exportNCDOT;
 $('csv').onclick=exportCSV;
-$('setbtn').onclick=()=>{ $('settings').classList.add('on'); syncSettings(); };
+$('setbtn').onclick=()=>{ $('settings').classList.add('on'); syncSettings(); renderUnmapped(); };
 $('set-x').onclick=()=>$('settings').classList.remove('on');
 $('settings').onclick=e=>{ if(e.target.id==='settings') $('settings').classList.remove('on'); };
 function syncSettings(){
@@ -2631,6 +3354,7 @@ $('f-rev').onchange=applyFilters;
 $('hidecleared').onchange=applyFilters;
 window.addEventListener('beforeunload',e=>{ if(REVDIRTY){ e.preventDefault(); e.returnValue=''; } });
 $('snbibtn').onclick=()=>loadSNBI();
+$('expandfeat').onclick=()=>deriveFeatures(VIEW.length&&VIEW.length<ALL.length?VIEW:ALL);
 $('cacherefresh').onclick=refreshCache;
 $('silentbtn').onclick=()=>{
   silentOnly=!silentOnly; $('silentbtn').classList.toggle('on',silentOnly);

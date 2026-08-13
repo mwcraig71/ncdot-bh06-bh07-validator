@@ -78,7 +78,7 @@ function parseEq(v) { const m = /^eq\.(.*)$/s.exec(v || ''); return m ? m[1] : n
 
 module.exports = function sbmock(page, opts = {}) {
   const log = [];
-  const snbi = loadSnbi().concat(opts.bigCounty ? bigCounty(opts.bigCounty) : []);
+  const snbi = (opts.snbi || loadSnbi()).concat(opts.bigCounty ? bigCounty(opts.bigCounty) : []);
 
   /* Route extents for every route the bridge fixture mentions, so deepCheck has
      something to join to. One route is deliberately absent: a route the extents

@@ -26,8 +26,10 @@ data actually is:
 
 ```
 structures            one row per bridge number (natural key)
-  └── features        SNBI FEATURE. B.F.01 designation (H01, R01, W01…),
+  ├── structure_twins   sister decks — recorded, not inferred
+  └── features        SNBI FEATURE. B.F.01 designation (H01, H02…),
                       B.F.02 location (C carried / B below)
+        ├── feature_routes     B.RT — one per designation signed on the roadway
         ├── feature_values     one row per (field, source)
         ├── findings           current rule failures
         │     └── cleared_findings   clear/restore, as events
@@ -36,7 +38,18 @@ structures            one row per bridge number (natural key)
 
 **BH06/BH07 belong to a feature, not a structure.** Concurrent route designations on one deck
 are route records beneath a single highway feature and get a *single* BH06/BH07 pair. Making
-the feature the grain is what stops that being re-litigated in application code.
+the feature the grain is what stops that being re-litigated in application code — and
+`feature_routes` is where the middle level of the hierarchy now lives, so it is a table rather
+than a convention someone has to remember. I-77 and US-21 co-signed on one deck are two rows
+there and one BH06/BH07 pair; put them a level up and the state reports the same deck twice.
+
+**A structure has as many features as it has roadways.** Bridge 590819 carries I-85 in both
+directions on one 156 ft superstructure and spans three more roadways: five features, five sets
+of values, one bridge number. Designations follow the crosswalk — every carried feature, then
+the primary below feature, then the rest — and `renumber_features()` applies it. That function
+has to be able to swap two designations, which is why the uniqueness constraint on
+`(structure_number, designation)` is deferrable: reordering necessarily passes through a
+collision, and without it the renumbering worked only when it was not needed.
 
 Only a feature with `designation like 'H%'` and `location_type = 'C'` can legitimately carry
 BH06/BH07. A highway feature with `location_type = 'B'` is the road *underneath* — the single
@@ -89,6 +102,7 @@ exported another for exactly that reason.
 | `finding_current` | findings with the latest clear/restore decision applied |
 | `structure_status` | per-structure rollup, cleared findings excluded from the counts |
 | `data_vintage` | latest successful load per service — what an export cites |
+| `feature_resolved` | one row per feature — the object a reviewer edits |
 | `county_geojson` | county outlines as GeoJSON, because PostgREST hands back WKB hex |
 | `structure_snbi` | the SNBI columns the browser shows, flattened |
 
@@ -173,14 +187,16 @@ record.
 
 ## Verification
 
-`tests/round_trip.sql` runs three blocks, each ending in a deliberate exception so the
+`tests/round_trip.sql` runs four blocks, each ending in a deliberate exception so the
 transaction rolls back and nothing persists. Block 1 covers resolution, constraints, the audit
 trail and clearing. Block 2 switches Postgres roles so the RLS policies are genuinely
 exercised — a test that runs as the table owner bypasses RLS and proves nothing. Block 3 covers
 the ingest boundary: that a republish under a live review raises a divergence and resolves
 nothing, that an unchanged republish raises nothing, that a value disappearing upstream counts
 too, that a *withdrawn* review does not make a republish contentious, and that no client role
-can execute an ingest function or read the token.
+can execute an ingest function or read the token. Block 4 covers the feature hierarchy: the
+population that gets a feature, the crosswalk ordering through a swap, route designations
+restarting inside each feature, concurrency staying one feature, and sister pairs.
 
 `tests/anon_api_test.sh` is the stronger half of the same question: it hits PostgREST over
 HTTPS with the publishable key, so grants, RLS and the API layer are exercised together rather
@@ -190,11 +206,37 @@ than simulated with `SET ROLE`.
 supabase/tests/anon_api_test.sh
 ```
 
-Current state: **25 assertions in block 1, 25 in block 2, 18 in block 3, 41 over the API — all
-passing.** Both database advisors report clean.
+Current state: **25 assertions in block 1, 25 in block 2, 18 in block 3, 20 in block 4, 41 over
+the API — all passing.** Both database advisors report clean.
+
+Block 4 found a real defect rather than confirming one: `renumber_features()` could not move a
+carried feature ahead of a below feature, because the designation it was vacating was still
+occupied for the duration of the statement. It was given 590819's own numbering — where the
+second carried roadway is numbered after three roadways beneath it — and refused it.
 
 A missing policy fails open in the direction that is hardest to notice, so none of this is
 asserted from reading the migration. It is asserted from a session that actually tried.
+
+## Which structures have a feature at all
+
+The bridge layer's `SERVICEON` says what the structure carries. The ingest asked for `'1'` and
+got 17,159 of 23,022 — and **2,582 structures that carry a highway had no feature, and therefore
+no BH06 or BH07 under test.** Measured live against the whole layer:
+
+| ServiceOn | | Structures |
+|---|---|---|
+| 1 | Highway | 17,159 |
+| 5 | Highway with pedestrian | 1,286 |
+| **6** | **Overpass at an interchange** | **1,282** |
+| 7 | Third level | 12 |
+| 4 | Highway-railroad | 1 |
+| 8 | Fourth level | 1 |
+| | **carries a highway** | **19,741** |
+
+Bridge 590819 — I-85 over I-485 — is coded 6. An interchange overpass is about the most
+highway-carrying structure there is, and it was invisible. `carries_highway()` is now the whole
+NBI set, and it accepts both the code the bridge layer publishes and the decoded label the
+structures layer publishes, because both reach that column.
 
 ## Ingest
 
