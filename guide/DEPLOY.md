@@ -60,7 +60,7 @@ The visitor's browser talks directly to three services:
 |---|---|---|
 | `gis11.services.ncdot.gov` | bridges, road network, county boundaries | essential |
 | `geo.dot.gov` | the FHWA HPMS submittal (BH06-3) | every other check still runs |
-| `server.arcgisonline.com` | background map tiles | cosmetic — the tool draws county outlines instead |
+| six tile hosts (Esri, Esri mirror, USGS National Map, NC OneMap, CARTO, gis11) | background map tiles | cosmetic — **any one** is enough, and the tool falls through them on its own; if all are blocked it draws county outlines instead |
 
 **All three were tested and confirmed to allow cross-origin requests from any HTTPS origin,
 including the POST preflight the heavier checks need.** Nothing needs proxying.

@@ -13,3 +13,15 @@ node tests/cache.test.js docs/index.html
 ```
 
 Eleven assertions; all should pass on all three builds.
+
+`basemap.test.js` blocks tile hosts one at a time and asserts the map finds another
+one — Esri → Esri mirror → USGS → CARTO → NCDOT-rendered → county outlines. It also
+checks the Web Mercator envelope the NCDOT export layer builds for each tile, and
+that a host outside the automatic chain can still be chosen by hand.
+
+```bash
+node tests/basemap.test.js dist/NCDOT_BH06_BH07_Validator.html
+```
+
+Both suites mock every endpoint, so neither needs network access to NCDOT, FHWA or
+any tile host.

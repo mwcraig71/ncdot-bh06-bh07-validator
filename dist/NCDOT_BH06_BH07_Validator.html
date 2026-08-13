@@ -1092,12 +1092,11 @@ td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
       <div class="chk"><input type="checkbox" id="l-label"><span class="lb">County names</span></div>
       <div class="chk"><input type="checkbox" id="l-route"><span class="lb">Route of selected bridge<em>drawn from Road Characteristics</em></span></div>
       <p class="hint" id="tilenote" style="display:none;color:#8a6f11;margin:0 0 8px">
-        Background tiles are blocked on this network, so the map is drawing county outlines only.
-        Everything else works. IT would need to allow <b>server.arcgisonline.com</b>.</p>
-      <div class="f-row" style="margin-top:10px"><label>Basemap</label><select id="f-base">
-        <option value="street">Street</option><option value="gray">Light gray</option>
-        <option value="topo">Topographic</option><option value="imagery">Imagery</option>
-      </select></div>
+        Every background source below is blocked on this network, so the map is drawing county
+        outlines only. Everything else works. <b>Diagnostics</b> in Settings lists exactly which
+        hosts were refused &mdash; that list is what IT needs.</p>
+      <div class="f-row" style="margin-top:10px"><label>Basemap</label><select id="f-base"></select></div>
+      <p class="hint" id="basehost" style="margin:6px 0 0"></p>
     </div>
 
     <div class="sec">
@@ -1517,12 +1516,63 @@ function revalidate(){
 /* ==========================================================================
    MAP
    ========================================================================== */
+/* Background tiles come from whichever host this network will actually talk to.
+   Esri is the default because it works nearly everywhere, but agency networks
+   block it often enough that there is no point pretending it is the only
+   option. Every entry below was checked live. Ordered roughly by how likely a
+   locked-down DOT network is to permit it:
+
+     Esri              the default, and a second Esri hostname — a proxy
+                       blocklist naming server.arcgisonline.com frequently does
+                       not also name services.arcgisonline.com
+     USGS National Map federal .gov, no key, topo and imagery
+     NC OneMap         NC's own state GIS — the best imagery of the lot
+     CARTO             clean cartography, commercial CDN
+     NCDOT             rendered live off gis11, the same server the bridge data
+                       comes from. If the tool works at all, this works.
+
+   OpenStreetMap's tile servers are deliberately absent: their usage policy does
+   not cover an application like this one, and they block the traffic anyway. */
+const NCBOUNDS=[[33.70,-84.45],[36.65,-75.35]];
 const BASE={
- street:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}','Esri'],
- gray:['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}','Esri'],
- topo:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}','Esri'],
- imagery:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}','Esri']
+ esri_street :{grp:'Esri',lbl:'Street',host:'server.arcgisonline.com',max:19,attr:'Esri',
+   url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'},
+ esri_gray   :{grp:'Esri',lbl:'Light gray',host:'server.arcgisonline.com',max:16,attr:'Esri',
+   url:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'},
+ esri_topo   :{grp:'Esri',lbl:'Topographic',host:'server.arcgisonline.com',max:19,attr:'Esri',
+   url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'},
+ esri_imagery:{grp:'Esri',lbl:'Imagery',host:'server.arcgisonline.com',max:19,attr:'Esri',
+   url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'},
+
+ esri2_street :{grp:'Esri mirror',lbl:'Street',host:'services.arcgisonline.com',max:19,attr:'Esri',
+   url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'},
+ esri2_imagery:{grp:'Esri mirror',lbl:'Imagery',host:'services.arcgisonline.com',max:19,attr:'Esri',
+   url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'},
+
+ usgs_topo   :{grp:'USGS National Map',lbl:'Topographic',host:'basemap.nationalmap.gov',max:16,attr:'USGS The National Map',
+   url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'},
+ usgs_imagery:{grp:'USGS National Map',lbl:'Imagery',host:'basemap.nationalmap.gov',max:16,attr:'USGS/USDA The National Map',
+   url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'},
+ usgs_imgtopo:{grp:'USGS National Map',lbl:'Imagery with roads',host:'basemap.nationalmap.gov',max:16,attr:'USGS The National Map',
+   url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}'},
+
+ nc1_ortho   :{grp:'NC OneMap',lbl:'NC orthoimagery',host:'services.nconemap.gov',max:19,bounds:NCBOUNDS,
+   attr:'NC Center for Geographic Information and Analysis',
+   url:'https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest_cached/ImageServer/tile/{z}/{y}/{x}'},
+
+ carto_light :{grp:'CARTO',lbl:'Light',host:'basemaps.cartocdn.com',max:20,attr:'CARTO, OpenStreetMap contributors',
+   url:'https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png'},
+ carto_voy   :{grp:'CARTO',lbl:'Voyager',host:'basemaps.cartocdn.com',max:20,attr:'CARTO, OpenStreetMap contributors',
+   url:'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png'},
+
+ ncdot_roads :{grp:'NCDOT',lbl:'NCDOT roads',host:'gis11.services.ncdot.gov',max:17,bounds:NCBOUNDS,export:true,
+   attr:'NCDOT',
+   url:'https://gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_StateMaintainedRoadsQtr/MapServer'}
 };
+/* The order tried automatically when tiles do not arrive. Each step changes
+   HOST, not just style — switching to another Esri layer on a blocked host
+   would only fail again. */
+const BASECHAIN=['esri_street','esri2_street','usgs_topo','carto_light','ncdot_roads'];
 if(typeof L==='undefined'){
   document.getElementById('map').innerHTML=
     '<div style="padding:38px;max-width:640px;font-size:13.5px;line-height:1.6">'+
@@ -1535,28 +1585,73 @@ if(typeof L==='undefined'){
   throw new Error('Leaflet unavailable');
 }
 const map=L.map('map',{preferCanvas:true,zoomControl:true}).setView([35.55,-79.4],7);
-let tileFails=0, tilesDead=false;
+let tileFails=0, tilesDead=false, tileOK=false, baseKey='esri_street';
+const DEADHOST=new Set();          /* hosts this network has demonstrably blocked */
+
+/* NCDOT publishes no tile cache, so its basemap is rendered per tile from the
+   MapServer's export endpoint — the tile's own Web Mercator envelope, drawn to
+   256x256. Slower than a cache, and worth it: it is the same host the bridge
+   data comes from, so it cannot be blocked on a network where the tool works. */
+const ExportLayer=L.TileLayer.extend({
+  getTileUrl:function(c){
+    const R=20037508.342789244, s=2*R/Math.pow(2,c.z);
+    const x0=-R+c.x*s, y1=R-c.y*s;
+    return this.options.svc+'/export?'+new URLSearchParams({
+      bbox:[x0,y1-s,x0+s,y1].join(','),bboxSR:'3857',imageSR:'3857',
+      size:'256,256',format:'png32',transparent:'false',dpi:'96',f:'image'}).toString();
+  }
+});
+
 function makeBase(key){
-  const t=L.tileLayer(BASE[key][0],{maxZoom:19,attribution:'Tiles &copy; Esri &middot; Data: NCDOT'});
+  const b=BASE[key];
+  const o={maxZoom:19,maxNativeZoom:b.max,attribution:b.attr+' &middot; Data: NCDOT'};
+  if(b.bounds) o.bounds=L.latLngBounds(b.bounds);     /* never request outside coverage */
+  const t=b.export? new ExportLayer('',Object.assign({svc:b.url},o)) : L.tileLayer(b.url,o);
+  t.on('tileload',()=>{ if(t===baseLayer) tileOK=true; });
   t.on('tileerror',()=>{
-    if(tilesDead) return;
-    if(++tileFails>=6){ tilesDead=true; goTileless(); }
+    if(tilesDead||t!==baseLayer||tileOK) return;      /* one good tile means the host is fine */
+    if(++tileFails>=6) tileBlocked(key);
   });
   return t;
 }
+
+/* Swap the background without disturbing anything drawn on top of it. */
+function setBase(key){
+  try{ map.removeLayer(baseLayer); }catch(e){}
+  tileFails=0; tileOK=false; baseKey=key;
+  baseLayer=makeBase(key).addTo(map); baseLayer.bringToBack();
+  const sel=$('f-base'); if(sel) sel.value=key;
+  if(tilesDead){ tilesDead=false; document.getElementById('map').style.background='';
+    const n=$('tilenote'); if(n) n.style.display='none';
+    if(countyLayer) countyLayer.setStyle({color:'#1A1A1A',weight:1,fill:false,opacity:.55}); }
+  if(typeof showBaseHost==='function') showBaseHost();
+}
+
+/* Six failures and not one tile through: this host is blocked. Move to the next
+   host in the chain rather than giving up on a background altogether. */
+function tileBlocked(key){
+  DEADHOST.add(BASE[key].host);
+  const nx=BASECHAIN.find(k=>!DEADHOST.has(BASE[k].host));
+  if(!nx){ tilesDead=true; goTileless(); return; }
+  setBase(nx);
+  toast('Background tiles from '+BASE[key].host+' are blocked on this network — switched to '+
+    BASE[nx].grp+', '+BASE[nx].lbl+' ('+BASE[nx].host+'). Pick a different one under Basemap if you prefer.',10000);
+}
 function goTileless(){
-  /* No tile server. Draw the state instead so the map is still readable: filled
-     counties, no background imagery. Everything else keeps working. */
+  /* Every host in the chain is blocked. Draw the state instead so the map is
+     still readable: filled counties, no background imagery. Everything else
+     keeps working. The picker stays enabled — a host that is not in the
+     automatic chain may still be reachable. */
   try{ map.removeLayer(baseLayer); }catch(e){}
   document.getElementById('map').style.background='#EDEDE7';
   if(countyLayer) countyLayer.setStyle({color:'#8C8C86',weight:1,fill:true,
     fillColor:'#F7F7F3',fillOpacity:1,opacity:.9});
-  $('f-base').disabled=true;
   const n=$('tilenote'); if(n) n.style.display='block';
-  toast('Your network blocked the background map tiles, so the map is drawing county outlines only. '+
-    'Bridges, checks and everything else are unaffected. Ask IT to allow server.arcgisonline.com if you want imagery.',11000);
+  toast('Every background tile source this tool knows about is blocked on this network, so the map is '+
+    'drawing county outlines only. Bridges, checks and everything else are unaffected. Try another entry '+
+    'under Basemap, or run Diagnostics in Settings to see exactly which hosts are refused.',12000);
 }
-let baseLayer=makeBase('street').addTo(map);
+let baseLayer=makeBase(baseKey).addTo(map);
 const ptLayer=L.layerGroup().addTo(map);
 const routeLayer=L.layerGroup().addTo(map);
 const labelLayer=L.layerGroup();
@@ -2945,15 +3040,28 @@ async function diagnostics(){
    ['FHWA HPMS','geo.dot.gov', async()=>{
       const j=await esriQuery(HPMSURL,{where:'1=1',returnCountOnly:'true'});
       return (j.count||0).toLocaleString()+' HPMS records';}],
-   ['Background map tiles','server.arcgisonline.com', async()=>new Promise(res=>{
-      const i=new Image(); const t=setTimeout(()=>res('BLOCKED (timeout)'),8000);
+  ];
+  /* One probe per distinct basemap host — the point is to find which of them
+     this network will serve, not to confirm that Esri is blocked again. */
+  const seen=new Set();
+  Object.keys(BASE).forEach(k=>{
+    const b=BASE[k]; if(seen.has(b.host)) return; seen.add(b.host);
+    tests.push(['Tiles: '+b.grp,b.host, ()=>new Promise(res=>{
+      const i=new Image(); const t=setTimeout(()=>res('BLOCKED (timeout)'),9000);
       i.onload=()=>{clearTimeout(t);res('reachable');};
       i.onerror=()=>{clearTimeout(t);res('BLOCKED');};
-      i.src=BASE.street[0].replace('{z}','5').replace('{y}','12').replace('{x}','8')+'?cb='+performance.now();})]
-  ];
+      /* a tile over the middle of North Carolina, cache-busted */
+      const u=b.export
+        ? b.url+'/export?bbox=-8974000,4187000,-8944000,4217000&bboxSR=3857&imageSR=3857'+
+          '&size=256,256&format=png32&transparent=false&f=image'
+        : b.url.replace('{z}','7').replace('{y}','50').replace('{x}','35');
+      i.src=u+(u.indexOf('?')<0?'?':'&')+'cb='+performance.now();})]);
+  });
   let h2='<div class="dr-sec" style="margin-top:0">Network diagnostics</div>'+
-    '<p style="font-size:12px;line-height:1.5">What this machine can reach. Everything except the tiles is '+
-    'required; tiles are cosmetic.</p><dl class="kv" style="grid-template-columns:150px 1fr">';
+    '<p style="font-size:12px;line-height:1.5">What this machine can reach. The data services are '+
+    'required. The tile hosts are cosmetic and interchangeable &mdash; <b>any one of them reachable is '+
+    'enough for a background map</b>, and the tool switches to it on its own.</p>'+
+    '<dl class="kv" style="grid-template-columns:150px 1fr">';
   $('dr-title').innerHTML='<h2>Diagnostics</h2><div class="s">connectivity from this machine</div>';
   $('dr-body').innerHTML=h2+'</dl>'; $('drawer').classList.add('open');
   const rows=[];
@@ -2966,13 +3074,24 @@ async function diagnostics(){
     $('dr-body').innerHTML=h2+rows.join('')+'</dl>';
   }
   const bad=rows.filter(r=>r.includes('#CF3910')).length;
-  $('dr-body').innerHTML=h2+rows.join('')+'</dl>'+
-    (bad?'<div class="find w" style="margin-top:14px"><b>'+bad+' blocked</b>'+
-      'Give this list to IT. The tool needs <span class="mono">gis11.services.ncdot.gov</span> for all data, '+
-      '<span class="mono">geo.dot.gov</span> for the HPMS test, and '+
-      '<span class="mono">server.arcgisonline.com</span> only for background imagery.</div>'
-     :'<div class="find" style="margin-top:14px;border-left-color:#2E7D32;background:#E6F1E6">'+
-      '<b>All clear</b>Everything this tool needs is reachable from this machine.</div>');
+  const tileRows=rows.filter(r=>r.includes('Tiles: '));
+  const tileOKn=tileRows.filter(r=>r.includes('#2E7D32')).length;
+  let verdict;
+  if(!bad){ verdict='<div class="find" style="margin-top:14px;border-left-color:#2E7D32;background:#E6F1E6">'+
+      '<b>All clear</b>Everything this tool needs is reachable from this machine.</div>'; }
+  else if(tileOKn && bad===tileRows.length-tileOKn){
+    verdict='<div class="find" style="margin-top:14px;border-left-color:#2E7D32;background:#E6F1E6">'+
+      '<b>Nothing to fix</b>Only tile hosts are blocked, and '+tileOKn+' of them still answer. '+
+      'Every data service is reachable, so the tool is fully working — pick one of the green tile '+
+      'sources under <b>Basemap</b> if the map looks bare.</div>';
+  } else {
+    verdict='<div class="find w" style="margin-top:14px"><b>'+bad+' blocked</b>'+
+      'Give this list to IT. The tool needs <span class="mono">gis11.services.ncdot.gov</span> for all '+
+      'data and <span class="mono">geo.dot.gov</span> for the HPMS test. Background tiles need '+
+      '<b>only one</b> of the tile hosts above — allowing any single one is enough, and '+
+      '<span class="mono">basemap.nationalmap.gov</span> is usually the easiest to get approved.</div>';
+  }
+  $('dr-body').innerHTML=h2+rows.join('')+'</dl>'+verdict;
 }
 
 /* ==========================================================================
@@ -3161,8 +3280,34 @@ $('dr-x').onclick=()=>{$('drawer').classList.remove('open');SEL=null;routeLayer.
 $('l-county').onchange=e=>{if(countyLayer) e.target.checked?countyLayer.addTo(map):map.removeLayer(countyLayer);};
 $('l-label').onchange=e=>{e.target.checked?labelLayer.addTo(map):map.removeLayer(labelLayer);};
 $('l-route').onchange=()=>{const b=ALL.find(x=>x.BRDG_NBR===SEL); drawRoute(b?b.RTE_ID:null);};
-$('f-base').onchange=e=>{if(tilesDead) return; map.removeLayer(baseLayer);
-  tileFails=0; baseLayer=makeBase(e.target.value).addTo(map); baseLayer.bringToBack();};
+/* Build the basemap picker from BASE, grouped by provider so the host is
+   visible — which host works is the whole question on a locked-down network. */
+(function(){
+  const sel=$('f-base'); const groups={};
+  Object.keys(BASE).forEach(k=>{ (groups[BASE[k].grp]=groups[BASE[k].grp]||[]).push(k); });
+  Object.keys(groups).forEach(g=>{
+    const og=document.createElement('optgroup');
+    og.label=g+'  ('+BASE[groups[g][0]].host+')';
+    groups[g].forEach(k=>og.appendChild(new Option(BASE[k].lbl,k)));
+    sel.appendChild(og);
+  });
+  const og=document.createElement('optgroup'); og.label='No background';
+  og.appendChild(new Option('County outlines only','__none'));
+  sel.appendChild(og);
+  sel.value=baseKey; showBaseHost();
+})();
+function showBaseHost(){
+  const el=$('basehost'); if(!el) return;
+  const b=BASE[baseKey];
+  el.textContent = tilesDead||!b ? 'No background tiles — county outlines only.'
+    : 'Serving from '+b.host+(b.export?' — rendered live off the same server as the bridge data.':'.');
+}
+$('f-base').onchange=e=>{
+  const v=e.target.value;
+  if(v==='__none'){ tilesDead=true; goTileless(); showBaseHost(); return; }
+  DEADHOST.delete(BASE[v].host);        /* an explicit pick deserves a fresh try */
+  setBase(v); showBaseHost();
+};
 $('hpmsfhwa').onclick=()=>fetchHPMS(ALL.length&&$('mode').value!=='all'?neededFips():null);
 $('hpmsbtn').onclick=()=>$('hpmsfile').click();
 $('hpmsfile').onchange=e=>{const f=e.target.files[0]; if(!f) return;

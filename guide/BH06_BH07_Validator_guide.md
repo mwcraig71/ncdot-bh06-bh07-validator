@@ -66,13 +66,33 @@ and cannot reach, so you can hand the list to IT rather than guessing. Three hos
 |---|---|---|
 | `gis11.services.ncdot.gov` | all bridge and road data | nothing works — this one is essential |
 | `geo.dot.gov` | the HPMS test (BH06-3) | every other check still runs |
-| `server.arcgisonline.com` | background map imagery only | **cosmetic** |
+| six tile hosts, below | background map imagery only | **cosmetic, and it self-heals** |
 
-That last one is the usual culprit, and it is not a real problem. If the tile server is
-blocked, the tool notices after a few failed tiles, switches to drawing North Carolina's county
-outlines itself, and tells you what happened. Bridges, checks, filters, the table and every
-export keep working exactly as before — you just lose the aerial or street background. Most
-people describing "the map doesn't load" are seeing this.
+Blocked background tiles are the usual complaint, and they are not a real problem. The
+background can come from any of six independent hosts, and **only one of them has to be
+reachable**:
+
+| Provider | Host |
+|---|---|
+| Esri | `server.arcgisonline.com` |
+| Esri mirror | `services.arcgisonline.com` |
+| USGS National Map | `basemap.nationalmap.gov` |
+| NC OneMap | `services.nconemap.gov` |
+| CARTO | `basemaps.cartocdn.com` |
+| NCDOT | `gis11.services.ncdot.gov` |
+
+That last row is the important one. NCDOT publishes no tile cache, so the tool renders a road
+basemap live from the same server the bridge data comes from — meaning **if the tool works at
+all, a background map is available**.
+
+When tiles stop arriving, the tool works down that list on its own, changing host each time
+rather than trying another style on a host that is already refused, and tells you which one it
+landed on. You can also pick any of them by hand under **Basemap** in the left panel, where each
+is labelled with its host. Only if every one is refused does it fall back to drawing county
+outlines, and even then bridges, checks, filters, the table and every export keep working.
+
+If you want to ask IT to allow one, `basemap.nationalmap.gov` is usually the easiest to get
+approved — it is a federal `.gov`, needs no key, and carries both topographic and aerial.
 
 ---
 
@@ -522,9 +542,11 @@ County boundary  .../NCDOT_CountyBdy_Poly/MapServer/0
 Pin drop         .../NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer
 ```
 
-Basemap tiles come from Esri's public service. If your network blocks them the map still
-works — county lines, bridges and all interaction are drawn locally; only the background
-imagery goes missing.
+Basemap tiles come from whichever of six hosts this network permits — Esri, an Esri mirror,
+USGS National Map, NC OneMap, CARTO, or a road basemap rendered live off gis11 itself. The tool
+falls through them automatically and you can force one under **Basemap**. If every one is
+blocked the map still works: county lines, bridges and all interaction are drawn locally, and
+only the background imagery goes missing.
 
 ---
 

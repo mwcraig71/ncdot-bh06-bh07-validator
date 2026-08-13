@@ -80,8 +80,18 @@ src/      tool_template.html + build.py — everything is generated from these
 guide/    user guide, deployment notes, and the original findings brief
 data/     the 213,475 NC HPMS route IDs, and review queues
 tools/    a Python CLI for the same checks, for bulk/offline work
-tests/    request-counting cache suite (Playwright, all endpoints mocked)
+tests/    request-counting cache suite and basemap-fallback suite (Playwright, all endpoints mocked)
 ```
+
+## The background map has six sources, and needs only one
+
+Agency networks block Esri's tile host often enough that treating it as the only option was a
+mistake. The tool now falls through six independent hosts — Esri, an Esri mirror, USGS National
+Map, NC OneMap, CARTO, and a road basemap rendered live off `gis11` — changing **host** at each
+step rather than trying another style on one that is already refused. Any single reachable host
+is enough, and the last of them is the same server the bridge data comes from, so a background
+map is available wherever the tool works at all. Each source is also selectable by hand under
+**Basemap**, labelled with its host, and **Diagnostics** probes all six and says which answered.
 
 ## Building
 
@@ -102,7 +112,7 @@ origin:
 |---|---|
 | `gis11.services.ncdot.gov` | bridges, road network with LRS measures, county boundaries, NCDOT's own route/milepost tool |
 | `geo.dot.gov` | FHWA's published HPMS submittal |
-| `server.arcgisonline.com` | background map tiles (cosmetic — the tool draws county outlines if blocked) |
+| `server.arcgisonline.com`, `services.arcgisonline.com`, `basemap.nationalmap.gov`, `services.nconemap.gov`, `basemaps.cartocdn.com` | background map tiles — cosmetic, and **any one** suffices; the tool falls through them automatically. NCDOT roads rendered off `gis11` are the final fallback, so a background is available wherever the data is |
 
 ## A note on the two builds
 
