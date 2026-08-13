@@ -1,5 +1,14 @@
-import base64,re
+import base64,re,os
 h=open('tool_template.html').read()
+
+# ---------------- Supabase project this build talks to -------------------------
+# The publishable (anon) key is meant to be in the page. It identifies the
+# project and nothing else: what it can actually do is decided by row level
+# security, where anon has SELECT and no more. Treating it as a secret would be
+# a misunderstanding of what it is.
+SB_URL = os.environ.get('SB_URL','https://drstmntdbmacdplhjvmx.supabase.co')
+SB_KEY = os.environ.get('SB_KEY','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyc3RtbnRkYm1hY2RwbGhqdm14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzMwMDEsImV4cCI6MjEwMjIwOTAwMX0.319PV9Prn8q6qurIMG_SHk63EoRQCv6tkGn_0fiwo7A')
+h = h.replace('__SB_URL__',SB_URL).replace('__SB_KEY__',SB_KEY)
 def b64(p): return base64.b64encode(open(p,'rb').read()).decode()
 LOGO=b64('/root/.claude/skills/synced/strinteg-design/assets/logo.png')
 
@@ -24,6 +33,12 @@ a=a.replace('<link rel="stylesheet" href="https://fonts.googleapis.com/css2?fami
 a=a.replace('<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>',
             '<script>/* Leaflet 1.9.4 — leafletjs.com (c) Vladimir Agafonkin, BSD-2 */\n'+ljs+'\n</script>')
 a=a.replace("--font-d:'Lato',Arial,sans-serif;","--font-d:'Open Sans',Arial,sans-serif;")
+# supabase-js inlined too, so the offline copy can still sign a reviewer in on a
+# network that allows the project but not a CDN
+sbjs=open('node_modules/@supabase/supabase-js/dist/umd/supabase.js').read()
+a=re.sub(r'<!--SBJS-->.*?<!--/SBJS-->',
+         lambda m: '<script>/* @supabase/supabase-js v2 - MIT */\n'+sbjs+'\n</script>',
+         a, flags=re.S)
 a=a.replace('__LOGO_B64__',LOGO)
 open('NCDOT_BH06_BH07_Validator.html','w').write(a)
 
@@ -34,24 +49,12 @@ b=b.replace("--font-d:'Lato',Arial,sans-serif;","--font-d:'Open Sans',Arial,sans
 b=b.replace('src="data:image/png;base64,__LOGO_B64__"','src="data:image/png;base64,'+LOGO+'"')
 open('NCDOT_BH06_BH07_Validator_artifact.html','w').write(b)
 
-# ---------------- variant C: public web build (no gate at all) ----------------
-import os
-def strip_gate(src):
-    src=re.sub(r'<!--GATE-START-->.*?<!--GATE-END-->','',src,flags=re.S)
-    src=re.sub(r'<!--ADMIN-START-->.*?<!--ADMIN-END-->','',src,flags=re.S)
-    src=re.sub(r'<!--PW-START-->.*?<!--PW-END-->','',src,flags=re.S)
-    src=re.sub(r'<!--ROLE-START-->.*?<!--ROLE-END-->','',src,flags=re.S)
-    src=re.sub(r'/\*GATEJS-START\*/.*?/\*GATEJS-END\*/',
-      "/* Published build: access is whatever the host allows, so there is no in-page\n"
-      "   gate. A gate in downloadable JavaScript protects nothing and misleads. */\nROLE='admin';",
-      src,flags=re.S)
-    # the whole point of PRISTINE was regenerating a configured copy — not needed
-    src=src.replace("const PRISTINE='<!DOCTYPE html>\\n'+document.documentElement.outerHTML;","const PRISTINE='';")
-    src=re.sub(r'/\*AUTHBLK-START\*/.*?/\*AUTHBLK-END\*/',
-      "const AUTH={salt:'',admin:'',user:''};   /* unused in the published build */\n"
-      "let ROLE='admin';                        /* no gate: everyone gets every action */\n"
-      "function isAdminStub(){return true;}",src,flags=re.S)
-    # public-page metadata
+# ---------------- variant C: public web build ---------------------------------
+# There is nothing left to strip. The gate is gone from the source itself: what
+# a person may do is decided by row level security on the Supabase project, and
+# all three builds now carry exactly the same code. The only difference here is
+# public-page metadata.
+def public_meta(src):
     src=src.replace('<title>NCDOT SNBI BH06 / BH07 Validator</title>',
       '<title>NCDOT SNBI BH06 / BH07 Validator \u2014 Strinteg</title>\n'
       '<meta name="description" content="Free browser tool that validates SNBI items BH06 (LRS Route ID) and '
@@ -67,7 +70,7 @@ def strip_gate(src):
       'stroke=\'white\' stroke-width=\'2.4\' fill=\'none\'/%3E%3C/svg%3E">')
     return src
 
-web=strip_gate(b)                      # start from the CDN-light variant
+web=public_meta(b)                     # start from the CDN-light variant
 os.makedirs('web',exist_ok=True)
 open('web/index.html','w').write(web)
 open('web/robots.txt','w').write("User-agent: *\nAllow: /\n")

@@ -144,13 +144,28 @@ origin:
 | `geo.dot.gov` | FHWA's published HPMS submittal |
 | `server.arcgisonline.com`, `services.arcgisonline.com`, `basemap.nationalmap.gov`, `services.nconemap.gov`, `basemaps.cartocdn.com` | background map tiles — cosmetic, and **any one** suffices; the tool falls through them automatically. NCDOT roads rendered off `gis11` are the final fallback, so a background is available wherever the data is |
 
-## A note on the two builds
+## Sign-in, and what it is for
 
-`dist/NCDOT_BH06_BH07_Validator.html` carries a two-password gate and its mapping library
-inside the file. That's the copy to email to staff and the one that survives a locked-down
-agency network.
+There is no password gate any more, in any build. There used to be one, and it was worse than
+nothing: it hashed a password into downloadable JavaScript, where View Source, deleting the
+check, or calling the functions from the console all defeated it in seconds — while reading
+enough like protection to tempt someone into reusing a real password in a file that publishes
+it.
 
-`docs/index.html` has **no gate and no password code at all** — deliberately. A gate in
-downloadable JavaScript protects nothing and misleads, and there is nothing to protect here:
-every input is already published by NCDOT and FHWA, and all review work stays in a file on the
-visitor's own machine.
+Reviewers now sign in with a link emailed to them, and **the reviewer's name is no longer
+something anyone types**. It comes from the account, and the database overwrites it from the
+request's token on the way in, so a correction cannot be signed with someone else's name.
+
+Signing in changes what the interface *draws*. It does not grant anything. Authority is the
+token, checked by Postgres: anonymous visitors get `SELECT` and nothing else, a signed-in
+reviewer gets the review surface and never `PUBLISHED`, and no client role can delete anything
+at all. Forcing the signed-in flag from the browser console gets the buttons back and achieves
+nothing, which is the point of having moved the rules to the server — and is asserted by the
+test suite rather than assumed.
+
+## A note on the builds
+
+`dist/NCDOT_BH06_BH07_Validator.html` carries its mapping library, fonts and auth client inside
+the file. That's the copy to email to staff and the one that survives a locked-down agency
+network. All three builds now contain exactly the same application code; `docs/index.html`
+differs only in carrying public-page metadata.

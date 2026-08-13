@@ -53,8 +53,8 @@ schema, not a rule someone has to remember. Three further things enforce it:
 
 - a trigger makes `(feature_id, field, source)` immutable, so a DERIVED row cannot be
   relabelled REVIEWED and launder a guess into a human decision;
-- RLS lets an authenticated client write `REVIEWED` rows and nothing else — `PUBLISHED`
-  belongs to ingest and `DERIVED` to the derive pass, both of which run as the service role;
+- RLS lets an authenticated client write `REVIEWED` and `DERIVED` rows only — `PUBLISHED`
+  belongs to ingest, which runs as the service role, and is invisible to a client UPDATE;
 - precedence is the **enum declaration order**. `value_source` is declared weakest-first, so
   the winner is `max(source)` and `order by source desc` picks it. Reorder that enum and you
   have changed the precedence of the entire system; there is nowhere else to look.
@@ -115,18 +115,51 @@ statement.
 
 ## Access
 
+Two layers, because they fail differently. **Grants** are coarse and refuse loudly —
+`permission denied for table`, which a client cannot mistake for success. **RLS** is
+fine-grained and refuses quietly. So the blunt rules are grants and the conditional ones are
+policies.
+
 | | anon | authenticated | service_role |
 |---|---|---|---|
-| read reference + values + findings | yes | yes | yes |
-| read `review_history` | **no** | yes | yes |
-| write `REVIEWED` corrections | no | yes, attributed to own account | yes |
-| write `PUBLISHED` / `DERIVED` | no | **no** | yes |
-| write structures, features, findings, HPMS, extents | no | **no** | yes |
+| read everything, including `review_history` | yes | yes | yes |
+| write `REVIEWED` corrections | no | yes | yes |
+| write `DERIVED` values, upsert `features` | no | yes — *Fill missing* runs in the browser | yes |
+| write `review`, `cleared_findings` | no | yes | yes |
+| write `PUBLISHED` | no | **no** | yes |
+| write structures, findings, HPMS, extents, ingest_runs | no | **no** | yes |
+| **DELETE anything** | **no** | **no** | only structures/features |
 | edit or delete audit / clearing history | no | no | **no** |
 
-Read is open because every input is already published by NCDOT and FHWA. Write is not, because
-a shared review layer feeding a submittal is evidence, and evidence with anonymous write access
-is not evidence.
+Read is open because every input is already published by NCDOT and FHWA, and the tool being
+useful without a login is the point of it. The audit trail is public too: it is the provenance
+of a public submittal, and a trail nobody can inspect is worth less than one they can — which
+is safe precisely because `reviewer_name` is a display name and never an address.
+
+**No client role has DELETE on any table.** Corrections supersede. Withdrawing one sets
+`withdrawn_at`, which leaves the row, its author and its history in place and lets resolution
+fall back to the next source down on its own. A cleared finding is restored by a later event.
+`features` in particular is undeletable by a client because it cascades — a reviewer able to
+drop a feature could erase a correction sideways without ever touching `feature_values`.
+
+A `PUBLISHED` row is not merely protected from being changed: the UPDATE policy's `USING`
+clause excludes it, so it is **invisible to a client UPDATE entirely** and the statement
+reports zero rows affected.
+
+## Identity is stamped, not submitted
+
+`actor` and `reviewer_name` are overwritten from the request's JWT by a `BEFORE` trigger.
+Whatever the client sends in those columns is discarded. RLS could already have rejected a
+wrong `actor`; nothing could have rejected a wrong *name*, and the name is what a person reads
+in an export.
+
+The display name prefers what the account has set and otherwise falls back to the **local part**
+of the email, never the whole address — `reviewer_name` is readable on a public page.
+
+The trigger keys on the presence of a `sub` claim rather than on a role name, because a
+`SECURITY DEFINER` function cannot see who called it (`current_user` is the function's owner).
+An ingest or derive job carries no `sub`, writes on behalf of nobody, and leaves `actor` null,
+which is the honest record of what happened.
 
 **RLS filters; it does not raise.** A denied UPDATE affects zero rows and reports success.
 Anything written against this database must check the affected row count rather than trusting
@@ -140,12 +173,23 @@ transaction rolls back and nothing persists. Block 1 covers resolution, constrai
 trail and clearing. Block 2 switches Postgres roles so the RLS policies are genuinely
 exercised — a test that runs as the table owner bypasses RLS and proves nothing.
 
-Current state: **23 assertions in block 1, 10 in block 2, all passing.** Both database
-advisors (security and performance) report clean, apart from `unused_index` notices that are
-expected while the tables are empty.
+`tests/anon_api_test.sh` is the stronger half of the same question: it hits PostgREST over
+HTTPS with the publishable key, so grants, RLS and the API layer are exercised together rather
+than simulated with `SET ROLE`.
+
+```bash
+supabase/tests/anon_api_test.sh
+```
+
+Current state: **24 assertions in block 1, 25 in block 2, 32 over the API — all passing.** Both
+database advisors report clean, apart from `unused_index` notices that are expected while the
+tables are empty.
+
+A missing policy fails open in the direction that is hardest to notice, so none of this is
+asserted from reading the migration. It is asserted from a session that actually tried.
 
 ## Still to come
 
-Ingest (0b) writes `structures`, `features`, `PUBLISHED` values, `route_extents`, `hpms_routes`
+Ingest writes `structures`, `features`, `PUBLISHED` values, `route_extents`, `hpms_routes`
 and `ingest_runs` as the service role. Validation writes `findings`. Neither exists yet, and
 the schema denies both to every client role until they do.

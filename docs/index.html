@@ -230,9 +230,11 @@ body.on-imagery .cntylab{color:#fff;
 .gatebox .revrow input{flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:0;min-width:0}
 #gateerr,#pw-msg{font-size:12px;color:var(--err);margin-top:10px;min-height:16px;line-height:1.45}
 .gfoot{font-size:10.5px;color:var(--gray-3);margin:16px 0 0;line-height:1.5}
-#rolebadge{font-family:var(--font-h);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+#whoami{font-family:var(--font-h);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
   border:1px solid var(--line);padding:2px 7px;color:var(--gray-2)}
-#rolebadge.adm{border-color:var(--orange);color:var(--orange)}
+#whoami.in{border-color:var(--ok);color:var(--ok)}
+.revrow input[readonly]{background:#F2F2EE;color:var(--gray-2)}
+#signinmsg{font-size:11.5px;margin-top:8px;min-height:15px;line-height:1.45}
 /* ---------------- phone / tablet ---------------- */
 @media (max-width:860px){
   header{padding:8px 12px;gap:10px}
@@ -339,7 +341,7 @@ body.on-imagery .cntylab{color:#fff;
   </div>
   <div class="hdr-sp"></div>
   <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-right:14px">
-    
+    <span id="whoami" title="Who this session is signed in as. Shown for your information; the database decides what you may actually write.">Not signed in</span>
   </div>
   <div class="hdr-meta">
     Data: <b>NCDOT public ArcGIS REST</b><br>
@@ -501,8 +503,23 @@ body.on-imagery .cntylab{color:#fff;
     </div>
     <div class="setbody">
 
+      <div class="setsec"><h4>Reviewer</h4>
+        <p class="hint" id="signinstate">Not signed in.</p>
+        <div id="signinbox">
+          <div class="revrow"><label>Email</label>
+            <input type="email" id="signinemail" placeholder="you@ncdot.gov" autocomplete="email"></div>
+          <div class="setbtns"><button class="btn ghost" id="signinbtn">Email me a sign-in link</button></div>
+          <p class="hint" id="signinmsg"></p>
+          <p class="hint">No password. A link arrives by email and signing in here records your
+          decisions against your account &mdash; which is why the name on a correction is not
+          something anyone can type.</p>
+        </div>
+        <div id="signoutbox" style="display:none">
+          <div class="setbtns"><button class="btn ghost" id="signoutbtn">Sign out</button></div>
+        </div>
+      </div>
+
       <div class="setsec"><h4>Review file</h4>
-        <div class="revrow"><label>Reviewer</label><input type="text" id="reviewer" placeholder="your name"></div>
         <div class="setbtns">
           <button class="btn ghost" id="revsave">Save review</button>
           <button class="btn ghost" id="revopen">Open</button>
@@ -560,31 +577,49 @@ body.on-imagery .cntylab{color:#fff;
 
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<!--SBJS--><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script><!--/SBJS-->
 <script>
 /* ==========================================================================
    NCDOT SNBI BH06 / BH07 Validator
    Strinteg Corporation
    All data is read live from NCDOT's public ArcGIS REST services. No login.
    ========================================================================== */
-/* Pristine copy of this file, captured before anything touches the DOM, so the
-   admin can download a re-configured copy after changing a password. */
-const PRISTINE='';
+/* ------------------------------------------------------------------ session ---
+   WHO IS SIGNED IN, AND NOTHING ELSE.
 
-/* ---------------------------------------------------------------- access ---
-   Passwords are stored as salted SHA-256 hashes, never in the clear. Be plain
-   about what this is: a gate that stops casual use and keeps the consequential
-   actions with the people who own them. It is NOT encryption. Anyone who opens
-   this file in a text editor can remove the gate. Every bit of data it reads is
-   already public on NCDOT's servers, so there is nothing secret to protect —
-   what it protects is the review record.
+   This object exists to show and hide controls so the interface is not full of
+   buttons that will fail. It is not a permission system and it decides nothing.
+   Every value in it is client-side, and anyone can set SESSION.user from the
+   console in about four seconds.
+
+   What actually decides is Postgres. Row level security on the Supabase project
+   grants the anonymous role SELECT and nothing else, and a signed-in reviewer
+   INSERT/UPDATE on the review surface only. If you flip a flag here you will
+   get the button back and the write will still be refused, which is the correct
+   outcome and the whole point of moving the rules to the server.
+
+   The password gate that used to live here is gone. It hashed a password into
+   downloadable JavaScript, which protected nothing: View Source, delete the
+   check, or call the functions from the console. Worse, it read as protection,
+   so it invited someone to reuse a real password in a file that publishes it.
    -------------------------------------------------------------------------- */
-const AUTH={salt:'',admin:'',user:''};   /* unused in the published build */
-let ROLE='admin';                        /* no gate: everyone gets every action */
-function isAdminStub(){return true;}
-function isAdmin(){ return ROLE==='admin'; }
-function needAdmin(what){
-  if(isAdmin()) return true;
-  toast(what+' is an administrator action. Ask whoever holds the admin password.',6000);
+const SESSION = { user:null, name:null, email:null, token:null };
+
+/* True when there is a signed-in account. Used ONLY to decide what to draw. */
+function signedIn(){ return !!SESSION.user; }
+
+/* The name that goes on a correction. Never typed in - it comes from the
+   account, so a reviewer cannot sign someone else's name to a decision. The
+   database re-derives it from the token and overwrites whatever is sent, so
+   this is a label, not a claim. */
+function reviewerName(){ return SESSION.name || ''; }
+
+/* Explains, rather than blocks. The write is refused by the database either
+   way; this only means the refusal is not a surprise. */
+function askSignIn(what){
+  if(signedIn()) return true;
+  toast(what+' is recorded against your account, so it needs you signed in. '+
+        'Open Settings and sign in under Reviewer.',6500);
   return false;
 }
 
@@ -666,7 +701,7 @@ const SEVNAME={e:'Error',w:'Warning',i:'Note',ok:'Clean'};
 
 /* ---------- state ---------- */
 let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN={}, DEEP=false;
-let REVIEW=new Map(), REVDIRTY=false, REVIEWER='';
+let REVIEW=new Map(), REVDIRTY=false;
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
 
@@ -1270,7 +1305,7 @@ function rec(bn,make){
   return r;
 }
 function touch(bn){
-  const r=rec(bn,true); r.by=REVIEWER||r.by||''; r.ts=Date.now();
+  const r=rec(bn,true); r.by=reviewerName()||r.by||''; r.ts=Date.now();
   REVDIRTY=true; $('revdot').style.display='inline-block';
 }
 function isCleared(bn,rule){ const r=REVIEW.get(bn); return !!(r&&r.cleared&&r.cleared[rule]); }
@@ -1281,14 +1316,14 @@ function effSev(b){
         :f.some(x=>RULEMAP[x].sev==='i')?'i':'ok';
 }
 function clearFinding(bn,rule,reason){
-  if(!needAdmin('Clearing a finding')) return;
+  if(!askSignIn('Clearing a finding')) return;
   const r=rec(bn,true);
-  r.cleared[rule]={reason:reason||'',by:REVIEWER||'',ts:Date.now()};
+  r.cleared[rule]={reason:reason||'',by:reviewerName(),ts:Date.now()};
   touch(bn); applyFilters();
   const b=ALL.find(x=>x.BRDG_NBR===bn); if(b) drawDetail(b);
 }
 function unclearFinding(bn,rule){
-  if(!needAdmin('Restoring a finding')) return;
+  if(!askSignIn('Restoring a finding')) return;
   const r=REVIEW.get(bn); if(!r) return;
   delete r.cleared[rule]; touch(bn); applyFilters();
   const b=ALL.find(x=>x.BRDG_NBR===bn); if(b) drawDetail(b);
@@ -1308,13 +1343,13 @@ const REVFILE_VERSION=2;
 
 function saveReview(){
   const out={tool:'NCDOT BH06/BH07 Validator',kind:'review-file',version:REVFILE_VERSION,
-    savedAt:new Date().toISOString(),savedBy:REVIEWER||'',entries:{}};
+    savedAt:new Date().toISOString(),savedBy:reviewerName(),entries:{}};
   REVIEW.forEach((v,k)=>{ if(v.status||v.note||v.fix06||v.fix07||Object.keys(v.cleared||{}).length) out.entries[k]=v; });
   const n=Object.keys(out.entries).length;
   if(!n){ toast('Nothing to save yet — add a note, set a status, or clear a finding first.',5000); return; }
   const blob=new Blob([JSON.stringify(out,null,1)],{type:'application/json'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download='BH06_BH07_review_'+(REVIEWER?REVIEWER.replace(/\W+/g,'_')+'_':'')+
+  a.href=url; a.download='BH06_BH07_review_'+(reviewerName()?reviewerName().replace(/\W+/g,'_')+'_':'')+
     new Date().toISOString().slice(0,10)+'.json';
   a.style.display='none'; document.body.appendChild(a); a.click();
   setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},400);
@@ -1736,7 +1771,7 @@ async function deriveMissing(){
       const line=why+' BH06/BH07 do not apply, so no value was derived. Checked automatically '+
         new Date().toLocaleDateString()+'.';
       if(!r.note) r.note=line;
-      r.by=REVIEWER||r.by||''; r.ts=Date.now(); REVDIRTY=true; $('revdot').style.display='inline-block';
+      r.by=reviewerName()||r.by||''; r.ts=Date.now(); REVDIRTY=true; $('revdot').style.display='inline-block';
       continue;
     }
 
@@ -1798,7 +1833,7 @@ async function deriveMissing(){
         ': BH06 '+rid+', BH07 '+mp.toFixed(3)+' ('+how+', '+m.d.toFixed(0)+' ft from the published coordinates'+
         (conf==='high'?'':conf==='medium'?' — plausible, worth a look':' — CONFIRM BEFORE USE, this may be the road underneath')+').';
       r.note = r.note ? (r.note.includes('Derived from NCDOT road network')? r.note : r.note+'\n'+line) : line;
-      r.by=REVIEWER||r.by||''; r.ts=Date.now();
+      r.by=reviewerName()||r.by||''; r.ts=Date.now();
       REVDIRTY=true; $('revdot').style.display='inline-block';
     }catch(e){ b._derived={verdict:'none'}; none++; }
     if(i%5===0) busy(true,'Deriving missing values',(i+1)+' / '+targets.length+' — '+
@@ -1827,13 +1862,13 @@ function exportNCDOT(){
   rows.forEach(b=>{const d=b._derived, dec=decodeRID(d.rid);
     out.push([b.BRDG_NBR,b.COUNTY,d.rid,d.mp.toFixed(3),dec?dec.label:'',
       b.F_CARRIED,b.FTR_INTRSC,b._snbi?b._snbi._type:'',d.conf.toUpperCase(),d.how,d.offset.toFixed(1),
-      b.LAT_DD,b.LONG_DD,REVIEWER||'',new Date().toISOString().slice(0,10),
+      b.LAT_DD,b.LONG_DD,reviewerName(),new Date().toISOString().slice(0,10),
       'NCDOT Road Characteristics LRS, measured along the route'].map(q).join(','));});
   /* structures that should carry no BH06 at all — also an action for NCDOT */
   nreq.forEach(b=>{
     out.push([b.BRDG_NBR,b.COUNTY,'','','',b.F_CARRIED,b.FTR_INTRSC,
       b._snbi?b._snbi._type:'','NOT REQUIRED',b._derived.why||'','', b.LAT_DD,b.LONG_DD,
-      REVIEWER||'',new Date().toISOString().slice(0,10),
+      reviewerName(),new Date().toISOString().slice(0,10),
       'No highway carried on the structure — B.F.01 does not begin with H'].map(q).join(','));});
   const blob=new Blob(['\ufeff'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob), a=document.createElement('a');
@@ -2186,8 +2221,8 @@ function findBlock(b,f,showCode){
     (cl? '<div class="clrnote">Cleared'+(cl.by?' by '+esc(cl.by):'')+
          (cl.ts?' on '+new Date(cl.ts).toLocaleDateString():'')+
          (cl.reason?' — '+esc(cl.reason):'')+
-         (isAdmin()?' <a href="#" class="rstr" data-rule="'+f+'">restore</a>':'')+'</div>'
-       : (isAdmin()
+         (signedIn()?' <a href="#" class="rstr" data-rule="'+f+'">restore</a>':'')+'</div>'
+       : (signedIn()
           ? '<div class="clrnote"><a href="#" class="clr" data-rule="'+f+'">clear this finding</a></div>'
           : '<div class="clrnote" style="opacity:.7">Only an administrator can clear a finding. '+
             'Leave a note below saying why you think it is not a problem.</div>'))+
@@ -2673,7 +2708,6 @@ function syncSettings(){
       (REVDIRTY?' Unsaved changes — save before you close.':' Saved.')
     : 'Notes, statuses and cleared findings live in a file you keep. Merge combines two reviewers.';
   updateCacheState();
-  if($('pwbtn')) $('pwbtn').style.display=isAdmin()?'':'none';
 }
 document.querySelectorAll('.mtabs button').forEach(t=>t.onclick=()=>{
   document.querySelectorAll('.mtabs button').forEach(x=>x.classList.remove('on'));
@@ -2686,7 +2720,9 @@ window.addEventListener('resize',()=>{ try{ map.invalidateSize(); }catch(e){} })
 $('diag').onclick=diagnostics;
 $('reftog').onclick=()=>{const b2=$('refbody'),on=b2.style.display==='none';
   b2.style.display=on?'':'none'; $('reftog').textContent=on?'hide':'show';};
-$('reviewer').oninput=e=>{REVIEWER=e.target.value.trim();};
+$('signinbtn').onclick=sendLink;
+$('signoutbtn').onclick=signOut;
+$('signinemail').onkeydown=e=>{ if(e.key==='Enter') sendLink(); };
 $('revsave').onclick=saveReview;
 $('revopen').onclick=()=>{$('revfile').dataset.merge='0';$('revfile').click();};
 $('revmerge').onclick=()=>{$('revfile').dataset.merge='1';$('revfile').click();};
@@ -2766,9 +2802,93 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('drawer').classLi
   const m=(j.serviceDescription||'').match(/(\d{2}\/\d{2}\/\d{4})/);
   $('pubdate').textContent=m?('Bridge layer published '+m[1]):'connected';}catch(e){$('pubdate').textContent='offline';}})();
 
-/* Published build: access is whatever the host allows, so there is no in-page
-   gate. A gate in downloadable JavaScript protects nothing and misleads. */
-ROLE='admin';
+/* ==========================================================================
+   REVIEWER IDENTITY
+   Supabase Auth, by emailed link. No password is typed into this page and none
+   is stored in it — the previous arrangement hashed one into the file, which
+   protected nothing and misrepresented itself as protection.
+
+   Signing in changes two things: the interface stops hiding the controls that
+   write, and requests carry a token. It grants nothing. Authority is the token,
+   checked by Postgres; this code cannot widen it and does not try.
+   ========================================================================== */
+const SB_URL='https://drstmntdbmacdplhjvmx.supabase.co', SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyc3RtbnRkYm1hY2RwbGhqdm14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzMwMDEsImV4cCI6MjEwMjIwOTAwMX0.319PV9Prn8q6qurIMG_SHk63EoRQCv6tkGn_0fiwo7A';
+let sb=null;
+
+function sbReady(){
+  if(sb) return sb;
+  if(typeof supabase==='undefined'||!SB_URL||SB_URL.indexOf('__')===0) return null;
+  try{ sb=supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true}}); }
+  catch(e){ sb=null; }
+  return sb;
+}
+
+/* Draw the current identity. Called on every auth change; touches nothing but
+   labels and visibility. */
+function applySession(){
+  const w=$('whoami');
+  if(w){ w.textContent = signedIn()? reviewerName() : 'Not signed in';
+         w.classList.toggle('in', signedIn()); }
+  const st=$('signinstate');
+  if(st) st.textContent = signedIn()
+    ? 'Signed in as '+reviewerName()+(SESSION.email?' ('+SESSION.email+')':'')+
+      '. Corrections and cleared findings are recorded against this account.'
+    : 'Not signed in. You can read, filter and export everything. Recording a '+
+      'correction or clearing a finding needs an account, so that the record says who decided it.';
+  const inb=$('signinbox'), out=$('signoutbox');
+  if(inb) inb.style.display = signedIn()?'none':'';
+  if(out) out.style.display = signedIn()?'':'none';
+  /* Show/hide only. The database refuses these regardless of what is drawn. */
+  document.body.classList.toggle('signed-in', signedIn());
+  if(SEL){ const b=ALL.find(x=>x.BRDG_NBR===SEL); if(b) drawDetail(b); }
+}
+
+function setSession(session){
+  const u=session&&session.user;
+  SESSION.user  = u? u.id : null;
+  SESSION.email = u? (u.email||null) : null;
+  SESSION.token = session? session.access_token : null;
+  /* Same precedence the database uses, so the label matches what gets stored:
+     a name they set, else the local part of the address — never the address. */
+  SESSION.name = u
+    ? ((u.user_metadata&&(u.user_metadata.full_name||u.user_metadata.name))
+       || (u.email? u.email.split('@')[0] : null))
+    : null;
+  applySession();
+}
+
+(function initAuth(){
+  const c=sbReady();
+  if(!c){
+    const st=$('signinstate');
+    if(st) st.textContent='This copy has no Supabase project configured, so there is no sign-in. '+
+      'Everything that reads still works; nothing can be recorded against an account.';
+    const inb=$('signinbox'); if(inb) inb.style.display='none';
+    applySession(); return;
+  }
+  c.auth.getSession().then(({data})=>setSession(data?data.session:null));
+  c.auth.onAuthStateChange((_e,session)=>setSession(session));
+})();
+
+async function sendLink(){
+  const c=sbReady(); if(!c) return;
+  const em=($('signinemail').value||'').trim();
+  const msg=$('signinmsg');
+  if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)){ msg.textContent='Enter a work email address.'; return; }
+  msg.style.color=''; msg.textContent='Sending…';
+  const {error}=await c.auth.signInWithOtp({email:em,
+    options:{emailRedirectTo:location.href.split('#')[0]}});
+  if(error){ msg.style.color='#CF3910'; msg.textContent=error.message; return; }
+  msg.style.color='#2E7D32';
+  msg.textContent='Check '+em+' for a sign-in link. Opening it here signs this browser in.';
+}
+
+async function signOut(){
+  const c=sbReady(); if(!c) return;
+  await c.auth.signOut();
+  setSession(null);
+  toast('Signed out. You can still read and export everything.',5000);
+}
 
 renderChecks();
 loadCounties();

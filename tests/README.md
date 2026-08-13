@@ -35,5 +35,17 @@ by one.
 node tests/corrections.test.js dist/NCDOT_BH06_BH07_Validator.html
 ```
 
-All three suites mock every endpoint, so none needs network access to NCDOT, FHWA or
-any tile host.
+`auth.test.js` asserts the password gate is gone from the shipped file — no
+`isAdmin`, `needAdmin`, `sha()`, `AUTH`, `ROLE`, `PRISTINE`, no gate overlay, no
+`type="password"` anywhere — that a signed-out visitor can still read, filter and
+export everything, that the reviewer name comes from the account rather than a
+text box, and that forcing `SESSION.user` from the console gets the buttons back
+and buys nothing, because the token is what the database checks.
+
+```bash
+node tests/auth.test.js dist/NCDOT_BH06_BH07_Validator.html
+```
+
+All four suites mock every endpoint, so none needs network access to NCDOT, FHWA,
+Supabase or any tile host. The database side has its own tests under
+`supabase/tests/`, including one that runs against the live project over HTTPS.
