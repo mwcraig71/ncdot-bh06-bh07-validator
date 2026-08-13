@@ -808,6 +808,10 @@ td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
   padding:2px 6px;border:1px solid currentColor;margin-right:3px}
 .b-err{color:var(--err);background:var(--err-t)} .b-warn{color:#8a6f11;background:var(--warn-t)}
 .b-info{color:var(--info);background:var(--info-t)} .b-ok{color:var(--ok);background:var(--ok-t)}
+.srctag{display:inline-block;font-family:var(--font-h);font-size:8.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--info);background:var(--info-t);border:1px solid var(--info);
+  padding:0 3px;margin-left:5px;vertical-align:1px;font-weight:600}
+.wasval{color:#9A9A9A;text-decoration:line-through}
 
 /* ---------- drawer ---------- */
 #drawer{position:fixed;top:0;right:0;width:392px;max-width:94vw;height:100%;background:#fff;
@@ -1346,6 +1350,8 @@ const RULES=[
 
  {id:'RAMP', grp:'note', sev:'i', t:'Ramp or non-mainline',
   d:'Class 8. HPMS carries no ramps at all — measured against NC HPMS 2024, 721 of 721 ramp-carried bridges fail BH06-3. Nothing you can fix by correcting the ID; it needs a reporting decision from FHWA or the state. Confirm at least that the bridge really carries a ramp and is not a mainline coded to one.'},
+ {id:'REVIEWED_VALUE', grp:'note', sev:'i', t:'Validated on a reviewer’s correction',
+  d:'Everything above was tested against a corrected value entered during review, not against what NCDOT currently publishes. That is deliberate — the corrected value is what will be submitted, so it is what has to pass. Both numbers are shown in the panel. Clearing this note is not the point of it: it exists so a corrected row can never be mistaken for a clean published one, and so you can filter for every correction and check the corrections themselves.'},
  {id:'PRECISION', grp:'note', sev:'i', t:'Low-precision milepoint',
   d:'The published value carries fewer than three decimals, which usually means it was rounded or hand-entered rather than measured. BH07 is reported to three decimals — pad with zeros, but confirm the value first.'}
 ];
@@ -1431,8 +1437,38 @@ function carriedTokens(s){
 }
 
 /* ---------- validation engine ---------- */
+/* --------------------------------------------------------------- resolution ---
+   A reviewer's corrected BH06/BH07 is the value that will be submitted, so it is
+   the value that has to be tested. Everything that used to read b.RTE_ID / b.MP
+   for validation reads through here instead: validate(), the duplicate pre-pass,
+   Deep check, Locate, the HPMS county set and the route overlay.
+
+   This is kept strictly separate from cleared findings. A correction changes
+   WHAT is tested; clearing changes whether a finding still counts. A correction
+   that is itself wrong therefore fails loudly, which is the whole point — it
+   used to pass silently into the export untested. */
+function effRid(b){
+  const r=REVIEW.get(b.BRDG_NBR);
+  const f=r&&r.fix06!=null?String(r.fix06).trim():'';
+  return f||String(b.RTE_ID==null?'':b.RTE_ID).trim();
+}
+function effMp(b){
+  const r=REVIEW.get(b.BRDG_NBR);
+  const f=r&&r.fix07!=null?String(r.fix07).trim():'';
+  if(f!=='') return f;
+  return (b.MP==null||b.MP==='')?null:b.MP;
+}
+const hasFix=(b,k)=>{ const r=REVIEW.get(b.BRDG_NBR);
+  return !!(r&&r[k]!=null&&String(r[k]).trim()!==''); };
+/* The key an offset was measured against, so a changed value invalidates it. */
+const offKey=(rid,n)=>rid+'@'+(n===null?'-':n.toFixed(3));
+
 function validate(b){
-  const flags=[], rid=(b.RTE_ID||'').trim(), mp=b.MP;
+  const flags=[], rid=effRid(b), mp=effMp(b);
+  b._rid=rid;
+  b._src06=hasFix(b,'fix06')?'REVIEWED':'PUBLISHED';
+  b._src07=hasFix(b,'fix07')?'REVIEWED':'PUBLISHED';
+  b._src=(b._src06==='REVIEWED'||b._src07==='REVIEWED')?'REVIEWED':'PUBLISHED';
   const d=decodeRID(rid);
 
   /* --- BH06-1 : null, and 120-character limit --- */
@@ -1469,6 +1505,14 @@ function validate(b){
   /* --- BH07-1 : must be a valid numeric value --- */
   const n=mp3(mp);                       /* the value that will actually be reported */
   b._mp3=n;
+
+  /* Locate measured a distance against a specific route and milepoint. If either
+     has changed since — a correction entered, edited or withdrawn — that distance
+     is about a value that no longer exists. Drop it and say so rather than show a
+     stale number against a new value. */
+  if(b._offFor!=null&&b._offFor!==offKey(rid,n)){ b._off=null; b._offStale=true; }
+  else if(b._offFor!=null) b._offStale=false;
+
   if(n===null) flags.push('BH07_1_NUM');
   else{
     /* --- BH07-2 : 8 digits maximum, measured on the reported 3-decimal value --- */
@@ -1496,6 +1540,11 @@ function validate(b){
   /* --- route exists at all? only knowable once Deep check has run --- */
   if(/^\d{11}$/.test(rid)&&ROUTEASKED.has(rid)&&!ROUTELEN[rid]) flags.push('ROUTE_NOT_FOUND');
 
+  /* Not a fault — a marker, so a row validated on a correction can never be
+     mistaken for a clean published one, and so corrections can be filtered and
+     audited as a group. */
+  if(b._src==='REVIEWED') flags.push('REVIEWED_VALUE');
+
   const sev=flags.some(f=>RULEMAP[f].sev==='e')?'e'
            :flags.some(f=>RULEMAP[f].sev==='w')?'w'
            :flags.some(f=>RULEMAP[f].sev==='i')?'i':'ok';
@@ -1506,7 +1555,7 @@ function validate(b){
 function revalidate(){
   /* pre-pass: any route+milepoint pair claimed by more than one bridge */
   const seen=new Map(); DUPES=new Set();
-  ALL.forEach(b=>{const r=(b.RTE_ID||'').trim(); const n=mp3(b.MP);
+  ALL.forEach(b=>{const r=effRid(b); const n=mp3(effMp(b));
     if(!r||r==='NA'||n===null) return;
     const k=r+'@'+n.toFixed(3); seen.set(k,(seen.get(k)||0)+1);});
   seen.forEach((v,k)=>{if(v>1) DUPES.add(k);});
@@ -1728,7 +1777,8 @@ function drawPoints(){
       color:'#fff', weight: big?0.6:1.2,
       fillColor:SEVCOL[b._esev||b._sev], fillOpacity:(b._esev||b._sev)==='ok'?.75:.95});
     m.on('click',()=>select(b.BRDG_NBR,false));
-    m.bindTooltip(b.BRDG_NBR+' — '+(b.RTE_ID||'no route')+' @ '+fmtMP(b.MP),{sticky:true});
+    m.bindTooltip(b.BRDG_NBR+' — '+(b._rid||'no route')+' @ '+(b._mp3===null?'—':b._mp3.toFixed(3))+
+      (b._src==='REVIEWED'?'  (reviewed)':''),{sticky:true});
     m._bn=b.BRDG_NBR;
     ptLayer.addLayer(m);
   });
@@ -1842,7 +1892,9 @@ async function run(){
   busy(true,'Loading bridges','contacting NCDOT',4);
   try{
     ALL=await queryAll(BRIDGES,where,BFIELDS,n=>busy(true,'Loading bridges',n.toLocaleString()+' records',Math.min(92,n/230)));
-    ROUTELEN={}; DEEP=false; LOCATED=false; ALL.forEach(b=>{b._off=null;b._fix=null;b._derived=null;b._snbi=SNBI.get(String(b.BRDG_NBR).trim())||null;});
+    ROUTELEN={}; DEEP=false; LOCATED=false;
+    ALL.forEach(b=>{b._off=null;b._offFor=null;b._offStale=false;b._fix=null;b._derived=null;
+      b._snbi=SNBI.get(String(b.BRDG_NBR).trim())||null;});
     revalidate();
     populateFilters();
     activeChecks.clear();
@@ -1862,7 +1914,7 @@ async function run(){
 
 /* ---- deep check: true route extents, so we can catch impossible milepoints ---- */
 async function deepCheck(){
-  const ids=[...new Set(ALL.map(b=>b.RTE_ID).filter(r=>r&&/^\d{11}$/.test(r)&&!ROUTELEN[r]))];
+  const ids=[...new Set(ALL.map(b=>b._rid).filter(r=>r&&/^\d{11}$/.test(r)&&!ROUTELEN[r]))];
   if(!ids.length){ toast('Nothing further to look up.',3000); return; }
   busy(true,'Deep check','measuring '+ids.length.toLocaleString()+' routes',2);
   const CH=140; let done=0, fail=0;
@@ -1932,8 +1984,14 @@ function reviewCounts(){
     if(['fixed','notissue','accepted'].includes(r.status)) done++; });
   return {noted,cleared,done,bridges:REVIEW.size};
 }
+/* v1 files carried fix06/fix07 but nothing ever tested them — the tool validated
+   NCDOT's published values and the corrections rode along untested. v2 means the
+   corrections are the values under test. The shape is identical, so both open
+   without conversion; the version only changes what we tell the reviewer. */
+const REVFILE_VERSION=2;
+
 function saveReview(){
-  const out={tool:'NCDOT BH06/BH07 Validator',kind:'review-file',version:1,
+  const out={tool:'NCDOT BH06/BH07 Validator',kind:'review-file',version:REVFILE_VERSION,
     savedAt:new Date().toISOString(),savedBy:REVIEWER||'',entries:{}};
   REVIEW.forEach((v,k)=>{ if(v.status||v.note||v.fix06||v.fix07||Object.keys(v.cleared||{}).length) out.entries[k]=v; });
   const n=Object.keys(out.entries).length;
@@ -1967,12 +2025,21 @@ function openReview(text,merge){
     } else if(v.note&&v.note!==cur.note){ cur.note=cur.note+'\n---\n'+v.note; }
     cur.cleared=Object.assign({},v.cleared||{},cur.cleared||{});
   });
+  /* corrections in the file are values under test, so re-test before reflowing */
+  if(ALL.length) revalidate();
   applyFilters();
   const c=reviewCounts();
+  let fixes=0; REVIEW.forEach(r=>{ if((r.fix06&&String(r.fix06).trim())||(r.fix07&&String(r.fix07).trim())) fixes++; });
+  const ver=Number(j.version||1);
   toast((merge?'Merged':'Opened')+' review file'+(j.savedBy?' from '+j.savedBy:'')+' — '+
     added.toLocaleString()+' new, '+merged.toLocaleString()+' already present'+
     (conflicts?', '+conflicts+' status conflict'+(conflicts===1?'':'s')+' resolved by newest':'')+
-    '. Now tracking '+c.bridges.toLocaleString()+' structures, '+c.cleared.toLocaleString()+' cleared findings.',11000);
+    '. Now tracking '+c.bridges.toLocaleString()+' structures, '+c.cleared.toLocaleString()+' cleared findings'+
+    (fixes?', '+fixes.toLocaleString()+' corrected value'+(fixes===1?'':'s')+
+      (ver<REVFILE_VERSION
+        ? ' — this file was written before corrections were validated, so they have just been tested for the first time. Expect findings to move.'
+        : ' — now validated in place of the published numbers.')
+     :'')+'.',13000);
 }
 
 /* ==========================================================================
@@ -2151,7 +2218,7 @@ function neededFips(){
   const sap=new Set();
   ALL.forEach(b=>{
     const c=COUNTIES[b.COUNTY]; if(c) sap.add(c);
-    const r=(b.RTE_ID||'').trim(); if(/^\d{11}$/.test(r)) sap.add(r.slice(8));
+    const r=b._rid||effRid(b); if(/^\d{11}$/.test(r)) sap.add(r.slice(8));
   });
   const fips=[];
   sap.forEach(s=>{ const f=SAP2FIPS[s]; if(f!=null) fips.push(f); });
@@ -2261,7 +2328,7 @@ async function resolveCarried(){
       });
       const toks=carriedTokens(b.F_CARRIED);
       const hits=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
-      const codedPresent=cand.has((b.RTE_ID||'').trim());
+      const codedPresent=cand.has((b._rid||'').trim());
 
       if(!hits.length){
         /* The route named in Feature Carried is not at this bridge. If the route
@@ -2421,7 +2488,7 @@ async function deriveMissing(){
     if(i%5===0) busy(true,'Deriving missing values',(i+1)+' / '+targets.length+' — '+
       (high+low)+' derived',(i+1)/targets.length*100);
   }
-  applyFilters(); busy(false);
+  revalidate(); applyFilters(); busy(false);   /* derived values land in fix06/fix07, so they are now tested too */
   $('ncdotcsv').disabled=(high+med+low)===0;
   toast('Of '+targets.length.toLocaleString()+' structures missing BH06/BH07: '+
     high.toLocaleString()+' derived with high confidence, '+med.toLocaleString()+' medium, '+
@@ -2493,7 +2560,7 @@ function pointAtM(paths,m){
 async function locateCheck(){
   TOLFT=Math.max(1,Number($('tol').value)||100);
   const byRoute=new Map();
-  ALL.forEach(b=>{const r=(b.RTE_ID||'').trim();
+  ALL.forEach(b=>{const r=b._rid;
     if(/^\d{11}$/.test(r)&&b._mp3!==null&&b.LAT_DD&&b.LONG_DD){
       if(!byRoute.has(r)) byRoute.set(r,[]); byRoute.get(r).push(b);}});
   const routes=[...byRoute.keys()];
@@ -2524,8 +2591,12 @@ async function locateCheck(){
         if(offset>20000) break;
       }
       chunk.forEach(r=>{
-        const pl=paths.get(r); if(!pl||!pl.length) return;
+        const pl=paths.get(r);
         byRoute.get(r).forEach(b=>{
+          /* stamp what this measurement is ABOUT, so a later correction to
+             either number can tell that the distance no longer applies */
+          b._offFor=offKey(b._rid,b._mp3); b._offStale=false;
+          if(!pl||!pl.length) return;
           const pt=pointAtM(pl,b._mp3); if(!pt) return;
           const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
           b._off=Math.hypot(pt[0]-sp.x, pt[1]-sp.y);
@@ -2536,7 +2607,7 @@ async function locateCheck(){
     busy(true,'Locate check',done.toLocaleString()+' / '+routes.length.toLocaleString()+' routes',done/routes.length*100);
   }
   LOCATED=true; revalidate(); applyFilters(); busy(false);
-  const cands=ALL.filter(b=>/^\d{11}$/.test((b.RTE_ID||'').trim())&&b._mp3!==null&&b.LAT_DD);
+  const cands=ALL.filter(b=>/^\d{11}$/.test(b._rid||'')&&b._mp3!==null&&b.LAT_DD);
   const measured=cands.filter(b=>b._off!=null);
   const unmeasured=cands.length-measured.length;
   const off=measured.filter(b=>b._off>TOLFT).length;
@@ -2554,8 +2625,8 @@ function populateFilters(){
   const fill=(id,vals,fmt)=>{const s=$(id),cur=s.value;s.innerHTML='<option value="">All</option>';
     vals.forEach(v=>s.add(new Option(fmt?fmt(v):v,v)));s.value=cur;};
   fill('f-div',[...new Set(ALL.map(b=>b.DIVISION).filter(x=>x!=null))].sort((a,b)=>a-b),v=>'Division '+v);
-  fill('f-class',Object.keys(CLASS).filter(k=>ALL.some(b=>(b.RTE_ID||'')[0]===k)),v=>CLASS[v].p+' — '+CLASS[v].n);
-  fill('f-inv',Object.keys(INV).filter(k=>ALL.some(b=>(b.RTE_ID||'')[2]===k)),v=>v+' — '+INV[v]);
+  fill('f-class',Object.keys(CLASS).filter(k=>ALL.some(b=>(b._rid||'')[0]===k)),v=>CLASS[v].p+' — '+CLASS[v].n);
+  fill('f-inv',Object.keys(INV).filter(k=>ALL.some(b=>(b._rid||'')[2]===k)),v=>v+' — '+INV[v]);
   fill('f-maint',[...new Set(ALL.map(b=>b.MAINT_RESP).filter(Boolean))].sort());
   fill('f-stype',[...new Set(ALL.map(b=>b._snbi?b._snbi._type:null).filter(Boolean))].sort());
   const cs=$('f-county'); if(cs.options.length<2) Object.keys(COUNTIES).sort().forEach(n=>cs.add(new Option(n,n)));
@@ -2624,8 +2695,8 @@ function applyFilters(){
     }
     if(fc&&b.COUNTY!==fc) return false;
     if(fd&&String(b.DIVISION)!==fd) return false;
-    if(fk&&(b.RTE_ID||'')[0]!==fk) return false;
-    if(fi&&(b.RTE_ID||'')[2]!==fi) return false;
+    if(fk&&(b._rid||'')[0]!==fk) return false;
+    if(fi&&(b._rid||'')[2]!==fi) return false;
     if(fm&&b.MAINT_RESP!==fm) return false;
     const fst=$('f-stype').value;
     if(fst&&(!b._snbi||b._snbi._type!==fst)) return false;
@@ -2639,7 +2710,7 @@ function applyFilters(){
     if(!isNaN(lo)&&!(b._mp3!==null&&b._mp3>=lo)) return false;
     if(!isNaN(hi)&&!(b._mp3!==null&&b._mp3<=hi)) return false;
     if(q){
-      const hay=[b.BRDG_NBR,b.RTE_ID,b.F_CARRIED,b.FTR_INTRSC,b.COUNTY].join(' ').toUpperCase();
+      const hay=[b.BRDG_NBR,b.RTE_ID,b._rid,b.F_CARRIED,b.FTR_INTRSC,b.COUNTY].join(' ').toUpperCase();
       if(!hay.includes(q)) return false;
     }
     return true;
@@ -2670,6 +2741,11 @@ function renderSummary(){
   $('tcount').textContent=VIEW.length.toLocaleString()+' row'+(VIEW.length===1?'':'s');
 }
 
+/* Marks a value that is a reviewer's correction rather than NCDOT's published
+   number. It sits beside the value everywhere the value appears, because "which
+   number is this?" must never be a question the reader has to work out. */
+const SRCTAG='<span class="srctag" title="Reviewer’s corrected value — this is what is being validated, not NCDOT’s published number">rev</span>';
+
 const COLS=[
  {k:'BRDG_NBR',t:'Bridge',w:''},{k:'COUNTY',t:'County'},{k:'_sevlab',t:'Status'},
  {k:'_bh06',t:'BH06 route ID',mono:1},{k:'_declab',t:'Decoded'},
@@ -2695,8 +2771,8 @@ function cell(b,k){
       (nc?'<span style="color:#5A5A5A">'+nc+' cleared</span>':'');
   }
   if(k==='_bh06'){
-    const v=(b.RTE_ID||'').trim();
-    if(v&&v!=='NA') return esc(v);
+    const v=(b._rid||'').trim();
+    if(v&&v!=='NA') return esc(v)+(b._src06==='REVIEWED'?SRCTAG:'');
     if(b._derived&&b._derived.verdict==='derived')
       return '<span style="color:'+(CONFCOL[b._derived.conf]||'#C9A227')+'" title="derived, '+
         esc(b._derived.how)+'">'+esc(b._derived.rid)+'&nbsp;&#9670;</span>';
@@ -2722,15 +2798,20 @@ function cell(b,k){
     return '<span class="badge b-'+({e:'err',w:'warn',i:'info'}[RULEMAP[f].sev])+'"'+
       (cl?' style="opacity:.4;text-decoration:line-through"':'')+'>'+esc(RULEMAP[f].t)+'</span>';}).join('');
   if(k==='MP'){
-    const v=fmtMP(b.MP);
-    if(v) return v;
+    const v=b._mp3===null?'':b._mp3.toFixed(3);
+    if(v) return v+(b._src07==='REVIEWED'?SRCTAG:'');
     if(b._derived&&b._derived.verdict==='derived')
       return '<span style="color:'+(CONFCOL[b._derived.conf]||'#C9A227')+'">'+
         b._derived.mp.toFixed(3)+'</span>';
     return '';
   }
-  if(k==='_off') return b._off==null?'':('<span style="color:'+(b._off>TOLFT?'#CF3910':'#5A5A5A')+'">'+
-    (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+'</span>');
+  if(k==='_off'){
+    if(b._off==null) return b._offStale
+      ? '<span style="color:#C9A227" title="The value changed after Locate ran, so the measured distance no longer applies. Re-run Locate.">re-locate</span>'
+      : '';
+    return '<span style="color:'+(b._off>TOLFT?'#CF3910':'#5A5A5A')+'">'+
+      (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+'</span>';
+  }
   return esc(b[k]);
 }
 function sortView(){
@@ -2747,8 +2828,8 @@ function sortView(){
     else if(sortKey==='_cond'){const f=o=>{if(!o._snbi)return 99;
       const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(k2=>parseInt(o._snbi[k2],10)).filter(z=>!isNaN(z));
       return v.length?Math.min(...v):99;}; x=f(a); y=f(b);}
-    else if(sortKey==='_bh06'){x=(a.RTE_ID||'')||(a._derived&&a._derived.rid)||'';
-      y=(b.RTE_ID||'')||(b._derived&&b._derived.rid)||'';}
+    else if(sortKey==='_bh06'){x=(a._rid||'')||(a._derived&&a._derived.rid)||'';
+      y=(b._rid||'')||(b._derived&&b._derived.rid)||'';}
     else {x=a[sortKey];y=b[sortKey];}
     if(x==null)x=''; if(y==null)y='';
     if(typeof x==='number'&&typeof y==='number') return (x-y)*sortDir;
@@ -2777,7 +2858,7 @@ function renderTable(){
    ========================================================================== */
 function select(bn,fromTable){
   SEL=bn; const b=ALL.find(x=>x.BRDG_NBR===bn); if(!b) return;
-  renderTable(); drawDetail(b); drawRoute(b.RTE_ID);
+  renderTable(); drawDetail(b); drawRoute(b._rid);
   $('drawer').classList.add('open');
   if(fromTable&&b.LAT_DD) map.setView([b.LAT_DD,b.LONG_DD],Math.max(map.getZoom(),14));
   const row=$('tscroll').querySelector('tr.sel'); if(row&&!fromTable) row.scrollIntoView({block:'nearest'});
@@ -2797,7 +2878,13 @@ function findBlock(b,f,showCode){
     '</div>';
 }
 function drawDetail(b){
-  const d=b._dec, rid=b.RTE_ID||'', rl=ROUTELEN[rid];
+  /* rid/mp here are the values UNDER TEST. pubRid/pubMp are what NCDOT
+     publishes. When they differ both are shown — the tested value primary, the
+     published one struck through beside it. */
+  const d=b._dec, rid=b._rid||'', rl=ROUTELEN[rid];
+  const pubRid=String(b.RTE_ID==null?'':b.RTE_ID).trim();
+  const pubMp=mp3(b.MP);
+  const rid6=b._src06==='REVIEWED', rid7=b._src07==='REVIEWED';
   $('dr-title').innerHTML='<h2>'+esc(b.BRDG_NBR)+'</h2><div class="s">'+esc(b.COUNTY||'')+
     ' County &middot; Division '+esc(b.DIVISION||'—')+'</div>';
   const rv=REVIEW.get(b.BRDG_NBR)||{status:'',note:'',fix06:'',fix07:'',cleared:{},by:'',ts:0};
@@ -2813,8 +2900,13 @@ function drawDetail(b){
       esc(rv.note||'')+'</textarea>'+
     '<div class="revmeta">'+(rv.ts?('last edited '+new Date(rv.ts).toLocaleString()+(rv.by?' by '+esc(rv.by):'')):'not reviewed yet')+
     (b._fix&&b._fix.verdict==='fix'?' &middot; <a href="#" id="rv-take">use the suggested correction</a>':'')+'</div></div>';
-  h+='<div class="big"><div class="k">BH06 &mdash; LRS Route ID</div><div class="v">'+
-     (rid&&rid!=='NA'?esc(rid):'<span style="color:#CF3910">not assigned</span>')+'</div>'+
+  h+='<div class="big"><div class="k">BH06 &mdash; LRS Route ID'+
+     (rid6?' <span style="color:#9A9A9A;letter-spacing:.06em">reviewer’s correction</span>':'')+
+     '</div><div class="v">'+
+     (rid&&rid!=='NA'?esc(rid)+(rid6?SRCTAG:''):'<span style="color:#CF3910">not assigned</span>')+'</div>'+
+     (rid6?'<div class="d">NCDOT publishes <span class="mono wasval">'+
+       (pubRid&&pubRid!=='NA'?esc(pubRid):'nothing')+'</span>. Everything below tests <b>'+esc(rid)+
+       '</b>, because that is the value you would submit.</div>':'')+
      '<div class="d">'+(d?esc(d.prefix+'-'+d.num)+' &middot; '+esc(d.clsName)+' &middot; '+esc(d.invName)+
      ' &middot; '+esc(d.cntyName)+' County':'Cannot be decoded as an NCDOT 11-digit route ID.')+'</div></div>';
   if(d){
@@ -2823,20 +2915,31 @@ function drawDetail(b){
       '><div class="dg">'+p[0]+'</div><div class="dl">'+p[1]+'</div></div>').join('')+'</div>';
   }
   const rawMP=(b.MP==null||b.MP==='')?null:String(b.MP);
-  const wasRounded=rawMP!==null&&rawMP!==fmtMP(b.MP);
+  const wasRounded=!rid7&&rawMP!==null&&rawMP!==fmtMP(b.MP);
   h+='<div class="big"><div class="k">BH07 &mdash; LRS Milepoint '+
-     '<span style="color:#9A9A9A;letter-spacing:.06em">reported, 3 dp</span></div><div class="v">'+
-     (b._mp3===null?'<span style="color:#CF3910">not assigned</span>':fmtMP(b.MP))+'</div>'+
+     '<span style="color:#9A9A9A;letter-spacing:.06em">'+(rid7?'reviewer’s correction':'reported, 3 dp')+
+     '</span></div><div class="v">'+
+     (b._mp3===null?'<span style="color:#CF3910">not assigned</span>':b._mp3.toFixed(3)+(rid7?SRCTAG:''))+'</div>'+
+     (rid7?'<div class="d">NCDOT publishes <span class="mono wasval">'+
+       (pubMp===null?'nothing':esc(pubMp.toFixed(3)))+'</span>. Everything below tests <b>'+
+       (b._mp3===null?'an unreadable value':esc(b._mp3.toFixed(3)))+'</b>, because that is the value you '+
+       'would submit.</div>':'')+
      (wasRounded?'<div class="d">NCDOT publishes <span class="mono" style="color:#1A1A1A">'+esc(rawMP)+
        '</span>, rounded here to the three decimals you report.</div>':'')+
      '<div class="d">'+(rl?('Route runs '+rl.min.toFixed(3)+' to '+rl.max.toFixed(3)+' in '+esc(b.COUNTY||'')+
        ' County. Mileposts reset to zero at every county line — this is not the mile marker sign number.')
        :'Run Deep check to compare this against the route’s true extent in the county.')+'</div>'+
-     (b._off==null?'':'<div class="d" style="border-top:1px solid #DDD;margin-top:8px;padding-top:7px;color:'+
-       (b._off>TOLFT?'#CF3910':'#2E7D32')+'"><b>'+
-       (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+' ft</b> from the bridge. '+
-       'Measured by following the route\u2019s own geometry to this milepoint — along the road, not across it.'+
-       (b._off>TOLFT?' Beyond the '+TOLFT+' ft tolerance.':'')+'</div>')+'</div>';
+     (b._off!=null
+       ?'<div class="d" style="border-top:1px solid #DDD;margin-top:8px;padding-top:7px;color:'+
+         (b._off>TOLFT?'#CF3910':'#2E7D32')+'"><b>'+
+         (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+' ft</b> from the bridge. '+
+         'Measured by following the route\u2019s own geometry to this milepoint — along the road, not across it.'+
+         (b._off>TOLFT?' Beyond the '+TOLFT+' ft tolerance.':'')+'</div>'
+       :b._offStale
+       ?'<div class="d" style="border-top:1px solid #DDD;margin-top:8px;padding-top:7px;color:#8a6f11">'+
+         '<b>Needs re-measuring.</b> Locate measured a distance for the previous value; the value has '+
+         'changed since, so that distance no longer applies. Run <b>Locate</b> again to test this one.</div>'
+       :'')+'</div>';
 
   const ff=b._flags.filter(f=>RULEMAP[f].grp==='fhwa'), qf=b._flags.filter(f=>RULEMAP[f].grp==='qc'),
         nf=b._flags.filter(f=>RULEMAP[f].grp==='note');
@@ -2923,7 +3026,10 @@ function drawDetail(b){
       '<div class="v">'+esc(b._fix.rid)+' @ '+b._fix.mp.toFixed(3)+'</div>'+
       '<div class="d">Milepoint read off that route&rsquo;s own geometry at this bridge'+
       (b._fix.offset!=null?', '+b._fix.offset.toFixed(1)+' ft from the published coordinates':'')+
-      '. Currently coded <span class="mono">'+esc(b.RTE_ID||'')+' @ '+fmtMP(b.MP)+'</span>. Review before applying.</div></div>';
+      '. NCDOT currently publishes <span class="mono">'+esc(b.RTE_ID||'')+' @ '+fmtMP(b.MP)+'</span>'+
+      (b._src==='REVIEWED'?', and this row is being validated on your correction <span class="mono">'+
+        esc(b._rid)+' @ '+(b._mp3===null?'—':b._mp3.toFixed(3))+'</span>':'')+
+      '. Review before applying.</div></div>';
   }
   const toks=carriedTokens(b.F_CARRIED);
   if(toks.length>1) h+='<div class="dr-sec">Concurrent routes</div><p style="font-size:12px;line-height:1.55">'+
@@ -2942,13 +3048,17 @@ function drawDetail(b){
   const st=$('rv-status'), nt=$('rv-note'), f6=$('rv-f06'), f7=$('rv-f07');
   if(st) st.onchange=()=>{ rec(bn,true).status=st.value; touch(bn); applyFilters(); };
   if(nt) nt.onchange=()=>{ rec(bn,true).note=nt.value; touch(bn); applyFilters(); };
-  if(f6) f6.onchange=()=>{ rec(bn,true).fix06=f6.value.trim(); touch(bn); applyFilters(); };
-  if(f7) f7.onchange=()=>{ rec(bn,true).fix07=f7.value.trim(); touch(bn); applyFilters(); };
+  /* A correction changes the value under test, so the row has to be re-tested —
+     applyFilters() alone only reflowed the view and left the old verdict standing. */
+  const applyFix=(k,el)=>{ rec(bn,true)[k]=el.value.trim(); touch(bn);
+    revalidate(); applyFilters(); drawDetail(ALL.find(x=>x.BRDG_NBR===bn)||b); };
+  if(f6) f6.onchange=()=>applyFix('fix06',f6);
+  if(f7) f7.onchange=()=>applyFix('fix07',f7);
   const take=$('rv-take');
   if(take) take.onclick=e=>{ e.preventDefault();
     const r=rec(bn,true); r.fix06=b._fix.rid; r.fix07=b._fix.mp.toFixed(3);
     if(!r.status) r.status='progress';
-    touch(bn); applyFilters(); drawDetail(b); };
+    touch(bn); revalidate(); applyFilters(); drawDetail(b); };
   $('dr-body').querySelectorAll('a.clr').forEach(a=>a.onclick=e=>{
     e.preventDefault();
     const why=prompt('Clear "'+RULEMAP[a.dataset.rule].t+'" for bridge '+bn+
@@ -3098,15 +3208,22 @@ async function diagnostics(){
    EXPORT
    ========================================================================== */
 function exportCSV(){
-  const cols=['BRDG_NBR','COUNTY','DIVISION','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','BH07_SOURCE_VALUE','ROUTE_DECODED',
+  const cols=['BRDG_NBR','COUNTY','DIVISION','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','BH07_SOURCE_VALUE',
+    'VALIDATED_BH06','VALIDATED_BH07','VALUE_SOURCE','ROUTE_DECODED',
     'ROUTE_CLASS','INVENTORY_CODE','ROUTE_MIN_MP','ROUTE_MAX_MP','OFFSET_FT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
-  VIEW.forEach(b=>{const d=b._dec,rl=ROUTELEN[b.RTE_ID];
+  VIEW.forEach(b=>{const d=b._dec,rl=ROUTELEN[b._rid];
     rows.push([b.BRDG_NBR,b.COUNTY,b.DIVISION,b.RTE_ID,fmtMP(b.MP),
-      (b.MP==null||b.MP==='')?'':String(b.MP),d?d.label:'',
+      (b.MP==null||b.MP==='')?'':String(b.MP),
+      /* the values the findings in this row were actually tested against */
+      b._rid||'', b._mp3===null?'':b._mp3.toFixed(3), b._src||'PUBLISHED',
+      d?d.label:'',
       d?d.clsName:'',d?d.invName:'',rl?rl.min.toFixed(3):'',rl?rl.max.toFixed(3):'',
+      /* OFFSET_FT was declared in the header and never emitted, which shifted every
+         column after it left by one. Emitted now, in its declared position. */
+      b._off==null?(b._offStale?'RE-LOCATE':''):b._off.toFixed(1),
       b.F_CARRIED,b.FTR_INTRSC,b.MAINT_RESP,b.FUNC_CLASS,b.LAT_DD,b.LONG_DD,
       (REVIEW.get(b.BRDG_NBR)||{}).status||'', (REVIEW.get(b.BRDG_NBR)||{}).note||'',
       (REVIEW.get(b.BRDG_NBR)||{}).by||'',
@@ -3204,7 +3321,7 @@ async function refreshCache(){
   SNBI=new Map(); SNBICOV.state=false; SNBICOV.counties.clear(); SNBICOV.known.clear();
   HPMS=new Map(); HPMSGOT=new Set();
   ROUTEGEO.clear(); ROUTELEN={}; ROUTEASKED=new Set(); DEEP=false; LOCATED=false;
-  ALL.forEach(b=>{ b._snbi=null; b._off=null; });
+  ALL.forEach(b=>{ b._snbi=null; b._off=null; b._offFor=null; b._offStale=false; });
   routeLayer.clearLayers();
   $('snbibtn').classList.remove('on');
   $('hpmsfhwa').classList.remove('on'); $('hpmsbtn').classList.remove('on');
@@ -3279,7 +3396,7 @@ $('clearf').onclick=()=>{['f-q','f-county','f-div','f-class','f-inv','f-maint','
 $('dr-x').onclick=()=>{$('drawer').classList.remove('open');SEL=null;routeLayer.clearLayers();renderTable();};
 $('l-county').onchange=e=>{if(countyLayer) e.target.checked?countyLayer.addTo(map):map.removeLayer(countyLayer);};
 $('l-label').onchange=e=>{e.target.checked?labelLayer.addTo(map):map.removeLayer(labelLayer);};
-$('l-route').onchange=()=>{const b=ALL.find(x=>x.BRDG_NBR===SEL); drawRoute(b?b.RTE_ID:null);};
+$('l-route').onchange=()=>{const b=ALL.find(x=>x.BRDG_NBR===SEL); drawRoute(b?b._rid:null);};
 /* Build the basemap picker from BASE, grouped by provider so the host is
    visible — which host works is the whole question on a locked-down network. */
 (function(){

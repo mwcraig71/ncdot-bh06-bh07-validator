@@ -425,6 +425,38 @@ Open any bridge and the panel now starts with a review block:
 If you've run *Resolve carried* and it proposed a correction, there's a one-click **use the
 suggested correction** link that fills both fields and sets the status.
 
+### Your correction is what gets tested
+
+The moment you enter a corrected BH06 or BH07, **every check re-runs against your value instead
+of NCDOT's**. The row's findings, the colour of its map dot and the summary counts all move
+immediately. That is the point: the corrected value is the one you would submit, so it is the
+one that has to pass.
+
+It cuts both ways, and deliberately so. A correction that fixes the problem clears the finding
+in front of you. A correction that is itself wrong — a county digit off, a milepoint past the
+end of the route, a route ID that collides with another bridge's — fails, loudly, right there.
+Corrections used to be stored, exported and never tested; a bad one went to NCDOT unchallenged.
+
+Wherever a corrected value appears it carries a small blue **REV** tag, and the bridge panel
+shows both numbers: yours in full size, NCDOT's struck through beneath it. You never have to
+work out which number a finding is about.
+
+Two things worth knowing:
+
+- Every corrected row carries the note **"Validated on a reviewer's correction"**. It is not a
+  fault. It exists so a corrected row can never be mistaken for a clean published one, and so
+  you can filter the checklist for every correction and review the corrections themselves.
+- If you had run **Locate**, the measured distance was measured against the *old* value. Change
+  either number and that distance is dropped and the row reads **re-locate** rather than showing
+  you a stale figure about a value that no longer exists. Run Locate again to measure the new one.
+
+This is separate from clearing a finding, and the two should not be confused. A correction
+changes *what is tested*. Clearing changes *whether a finding still counts*. Use a correction
+when the value is wrong; use **clear this finding** when the value is right and the check is not.
+
+*Fill missing* writes its derived values into these same fields, which means derived BH06/BH07
+values are now tested too — including the low-confidence ones it warns you to confirm.
+
 ### Clearing a finding
 
 Under every individual finding there's **clear this finding**. It asks why, and that reason is
@@ -444,6 +476,10 @@ a file you control rather than a browser profile that gets wiped.
 **Settings → Save review** writes a JSON file named for you and the date. **Open** loads one
 back. There's an unsaved-changes dot on the Settings button and the browser will warn you before you close with
 work outstanding.
+
+Review files are stamped `version: 2`. Files written by an earlier copy of the tool open
+normally — the tool just tells you that their corrections were never validated and have now been
+tested for the first time, so expect the finding counts to move when you open one.
 
 **Merge** is the one that matters for a team. Two people can work the same county on their own
 copies and combine afterwards — newest edit wins per field, notes that differ are kept both,

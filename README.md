@@ -42,6 +42,22 @@ still wrong:
 - Duplicate route+milepoint pairs, routes that don't exist, county-code mismatches,
   non-inventory directions, and more.
 
+## A reviewer's correction is what gets validated
+
+Enter a corrected BH06 or BH07 in the bridge panel and every check re-runs against **that**
+value instead of NCDOT's published one — findings, map colour and summary counts all move.
+Corrections used to be stored and exported without ever being tested, so a correction that was
+itself wrong reached NCDOT unchallenged.
+
+A correction that fixes the problem clears the finding. A correction that is wrong fails, in
+front of the person who just typed it. Corrected values carry a **REV** tag everywhere they
+appear, and the panel shows the published number struck through beside them, so which number a
+finding refers to is never a question. A corrected row also carries a standing note, so it can
+never be mistaken for a clean published one.
+
+This stays strictly separate from clearing a finding: a correction changes *what is tested*,
+clearing changes *whether a finding counts*.
+
 ## Reference data is read once
 
 Bridges are re-queried every run, because that is the thing you are asking about.

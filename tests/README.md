@@ -23,5 +23,17 @@ that a host outside the automatic chain can still be chosen by hand.
 node tests/basemap.test.js dist/NCDOT_BH06_BH07_Validator.html
 ```
 
-Both suites mock every endpoint, so neither needs network access to NCDOT, FHWA or
+`corrections.test.js` proves a reviewer's corrected BH06/BH07 is actually validated:
+that a wrong correction fails, a right one clears the finding it was meant to fix,
+withdrawing one restores the published verdict exactly, corrections feed the
+duplicate pre-pass, a changed value invalidates the cached Locate offset, and both
+v1 and v2 review files round-trip. It also pins CSV column alignment — the header
+declared `OFFSET_FT` and the rows never emitted it, which shifted every later column
+by one.
+
+```bash
+node tests/corrections.test.js dist/NCDOT_BH06_BH07_Validator.html
+```
+
+All three suites mock every endpoint, so none needs network access to NCDOT, FHWA or
 any tile host.
