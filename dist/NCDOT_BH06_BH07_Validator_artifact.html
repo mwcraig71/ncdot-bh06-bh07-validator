@@ -129,6 +129,13 @@ main{flex:1;display:flex;min-height:0}
   color:var(--black);white-space:nowrap;cursor:pointer;z-index:2;font-weight:500}
 #tscroll thead th:hover{color:var(--orange)}
 #tscroll thead th .ar{color:var(--orange);font-size:9px}
+#tscroll thead tr.cfrow th{position:sticky;top:26px;z-index:4;padding:2px 4px;background:#F4F4F4;
+  border-bottom:1px solid #DDD;cursor:default;font-weight:400}
+#tscroll thead tr.cfrow th:hover{color:inherit}
+#tscroll thead tr.cfrow input.cf{width:100%;min-width:52px;box-sizing:border-box;font-family:var(--font-b);
+  font-size:11px;padding:2px 4px;border:1px solid #CFCFCF;border-radius:2px;background:#fff;color:#1A1A1A}
+#tscroll thead tr.cfrow input.cf:focus{outline:none;border-color:var(--orange);background:#FFF8F6}
+#tscroll thead tr.cfrow input.cf::placeholder{color:#B4B4B4}
 #tscroll tbody td{padding:5px 9px;border-bottom:1px solid #f0f0f0;white-space:nowrap}
 #tscroll tbody tr{cursor:pointer}
 #tscroll tbody tr:hover{background:var(--orange-tint)}
@@ -2858,7 +2865,7 @@ function renderSummary(){
     : 'Nothing reviewed yet. Open a bridge, set a status, leave a note, or clear a finding — then Save review.';
   $('meter').innerHTML=['e','w','i','ok'].map(s=>c[s]?'<i style="background:'+SEVCOL[s]+
     ';width:'+(c[s]/tot*100)+'%" title="'+SEVNAME[s]+': '+c[s].toLocaleString()+'"></i>':'').join('');
-  $('tcount').textContent=VIEW.length.toLocaleString()+' row'+(VIEW.length===1?'':'s');
+  setCount();
 }
 
 /* Marks a value that is a reviewer's correction rather than NCDOT's published
@@ -2956,20 +2963,109 @@ function sortView(){
     return String(x).localeCompare(String(y),undefined,{numeric:true})*sortDir;
   });
 }
+/* ---- filtering on the table itself ------------------------------------------
+   The left panel filters what the data IS. This filters what the table SHOWS,
+   column by column, and it matches against the text in the cell — so what you
+   type is checked against what you can see, including the decoded label, the
+   findings and the suggested correction, none of which exist as a field
+   anywhere.
+
+   Numeric columns take a comparison as well as a number: >100, <=0.5, 2-8. A
+   milepoint filter that could only match exactly would be no use at all. */
+const COLF={};                       /* column key -> what the reviewer typed */
+const NUMCOL={MP:1,_off:1};
+
+function cellText(b,k){
+  return String(cell(b,k)||'').replace(/<[^>]*>/g,' ')
+    .replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+    .replace(/\s+/g,' ').trim();
+}
+/* ">100", "<=0.5", "2-8", "0.227" — and "-" for nothing recorded */
+function numMatch(expr,v){
+  const e=String(expr).trim();
+  if(e==='-'||/^(none|null|blank|empty)$/i.test(e)) return v===null||v===undefined;
+  /* Someone typing ">100" is holding ">" for a moment. Deciding anything on a
+     half-typed expression makes the table jump about under them — so an
+     expression that is not yet a comparison matches everything, including the
+     rows that have no value at all. */
+  if(!/[\d.]/.test(e)) return true;
+  if(v===null||v===undefined) return false;
+  let m=/^(>=|<=|>|<|=)?\s*(-?[\d.]+)$/.exec(e);
+  if(m){ const n=Number(m[2]);
+    switch(m[1]){ case '>':return v>n; case '<':return v<n; case '>=':return v>=n;
+                  case '<=':return v<=n; default:return Math.abs(v-n)<0.0005; } }
+  m=/^(-?[\d.]+)\s*(?:-|to|\.\.)\s*(-?[\d.]+)$/i.exec(e);
+  if(m) return v>=Number(m[1])&&v<=Number(m[2]);
+  return true;                       /* half-typed: do not hide everything */
+}
+function numOf(b,k){ return k==='MP'?b._mp3 : k==='_off'?(b._off==null?null:b._off) : null; }
+
+function passesColumns(b){
+  for(const k in COLF){
+    const q=(COLF[k]||'').trim();
+    if(!q) continue;
+    if(NUMCOL[k]){ if(!numMatch(q,numOf(b,k))) return false; continue; }
+    const neg=q[0]==='!';
+    const t=cellText(b,k).toUpperCase();
+    const needle=(neg?q.slice(1):q).trim().toUpperCase();
+    if(!needle) continue;
+    const hit = (needle==='-'||needle==='(BLANK)') ? t==='' : t.includes(needle);
+    if(neg?hit:!hit) return false;
+  }
+  return true;
+}
+const colFilterCount=()=>Object.keys(COLF).filter(k=>(COLF[k]||'').trim()).length;
+
+function setCount(){
+  const el=$('tcount'); if(!el) return;
+  const shown=VIEW.filter(passesColumns).length, ncf=colFilterCount();
+  el.textContent=shown.toLocaleString()+' row'+(shown===1?'':'s')+
+    (ncf?' of '+VIEW.length.toLocaleString()+', '+ncf+' column filter'+(ncf===1?'':'s'):'');
+}
+
 function renderTable(){
-  if(!VIEW.length){$('tscroll').innerHTML='<div class="empty"><b>Nothing matches</b>'+
-    (ALL.length?'Loosen the filters on the left.':'Pick a scope above and press Run.')+'</div>';return;}
-  const cap=VIEW.slice(0,3000);
-  let h='<table><thead><tr>'+COLS.map(c=>'<th data-k="'+c.k+'">'+c.t+
-    (sortKey===c.k?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':'')+'</th>').join('')+'</tr></thead><tbody>';
+  const rows=VIEW.filter(passesColumns);
+  setCount();
+  const nf=colFilterCount();
+  const head='<table><thead><tr>'+COLS.map(c=>'<th data-k="'+c.k+'">'+c.t+
+      (sortKey===c.k?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':'')+'</th>').join('')+'</tr>'+
+    '<tr class="cfrow">'+COLS.map(c=>'<th><input class="cf" data-k="'+c.k+'" value="'+
+      esc(COLF[c.k]||'')+'" placeholder="'+(NUMCOL[c.k]?'>100':'filter')+
+      '" title="'+(NUMCOL[c.k]
+        ? 'A number, or a comparison: &gt;100, &lt;=0.5, 2-8. Use - for nothing recorded.'
+        : 'Matches the text in this column. Start with ! to exclude, - for empty.')+'"></th>').join('')+
+    '</tr></thead>';
+  if(!rows.length){
+    $('tscroll').innerHTML='<div class="empty"><b>Nothing matches</b>'+
+      (!VIEW.length
+        ? (ALL.length?'Loosen the filters on the left.':'Pick a scope above and press Run.')
+        : 'The column filters exclude all '+VIEW.length.toLocaleString()+' rows in view.')+'</div>'+
+      (nf?'<div style="padding:0 14px 14px;text-align:center"><a href="#" id="cf-clear">clear the '+
+        nf+' column filter'+(nf===1?'':'s')+'</a></div>':'');
+    const cc=$('cf-clear'); if(cc) cc.onclick=e=>{e.preventDefault();
+      Object.keys(COLF).forEach(k=>delete COLF[k]); applyFilters();};
+    return;
+  }
+  const cap=rows.slice(0,3000);
+  let h=head+'<tbody>';
   cap.forEach(b=>{h+='<tr data-b="'+esc(b.BRDG_NBR)+'"'+(SEL===b.BRDG_NBR?' class="sel"':'')+'>'+
     COLS.map(c=>'<td'+(c.mono?' class="mono"':'')+'>'+cell(b,c.k)+'</td>').join('')+'</tr>';});
   h+='</tbody></table>';
-  if(VIEW.length>cap.length) h+='<div class="empty" style="padding:14px">Showing the first '+
-    cap.length.toLocaleString()+' of '+VIEW.length.toLocaleString()+' rows. Filter further, or export the full set to CSV.</div>';
+  if(rows.length>cap.length) h+='<div class="empty" style="padding:14px">Showing the first '+
+    cap.length.toLocaleString()+' of '+rows.length.toLocaleString()+' rows. Filter further, or export the full set to CSV.</div>';
   $('tscroll').innerHTML=h;
-  $('tscroll').querySelectorAll('thead th').forEach(th=>th.onclick=()=>{
+  $('tscroll').querySelectorAll('thead tr:first-child th').forEach(th=>th.onclick=()=>{
     const k=th.dataset.k; sortDir=(sortKey===k)?-sortDir:1; sortKey=k; sortView(); renderTable();});
+  $('tscroll').querySelectorAll('input.cf').forEach(el=>{
+    el.onclick=e=>e.stopPropagation();
+    el.oninput=()=>{
+      COLF[el.dataset.k]=el.value;
+      const at=el.selectionStart, k=el.dataset.k;
+      renderTable();
+      const again=$('tscroll').querySelector('input.cf[data-k="'+k+'"]');
+      if(again){ again.focus(); try{ again.setSelectionRange(at,at); }catch(e){} }
+    };
+  });
   $('tscroll').querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>select(tr.dataset.b,true));
 }
 
@@ -3508,7 +3604,9 @@ function exportCSV(){
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
-  VIEW.forEach(b=>{const d=b._dec,rl=ROUTELEN[b._rid];
+  /* The export is what is on screen. Filtering the table down to twelve rows
+     and getting all 1,282 in the file would be a trap. */
+  VIEW.filter(passesColumns).forEach(b=>{const d=b._dec,rl=ROUTELEN[b._rid];
     rows.push([b.BRDG_NBR,b.COUNTY,b.DIVISION,b.RTE_ID,fmtMP(b.MP),
       (b.MP==null||b.MP==='')?'':String(b.MP),
       /* the values the findings in this row were actually tested against */
@@ -3542,10 +3640,13 @@ function exportCSV(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement('a');
   a.href=url; a.style.display='none';
-  a.download='NCDOT_BH06_BH07_'+$('mode').value+'_'+VIEW.length+'.csv';
+  const n=rows.length-1, ncf=colFilterCount();
+  a.download='NCDOT_BH06_BH07_'+$('mode').value+'_'+n+'.csv';
   document.body.appendChild(a); a.click();
   setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},400);
-  toast('Exported '+VIEW.length.toLocaleString()+' rows.',3000);
+  toast('Exported '+n.toLocaleString()+' rows'+
+    (ncf?' — the '+ncf+' column filter'+(ncf===1?'':'s')+' on the table applied, so this is what you were looking at.':'.'),
+    ncf?7000:3000);
 }
 
 /* ==========================================================================
@@ -3710,7 +3811,8 @@ $('silentbtn').onclick=()=>{
   $('silentbtn').textContent=silentOnly?'Showing only clean-but-wrong — click to undo'
                                        :'Show what submits clean but is wrong';
   applyFilters();};
-$('clearf').onclick=()=>{['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax','f-triage']
+$('clearf').onclick=()=>{Object.keys(COLF).forEach(k=>delete COLF[k]);
+  ['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax','f-triage']
   .concat(['f-stype','f-cond']).forEach(i=>$(i).value=''); activeChecks.clear();
   silentOnly=false; $('silentbtn').classList.remove('on');
   $('silentbtn').textContent='Show what submits clean but is wrong'; applyFilters();};

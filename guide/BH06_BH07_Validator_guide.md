@@ -139,6 +139,31 @@ Two switches in Settings worth knowing:
   query the road network one structure at a time, so on very large scopes the tool asks before
   starting them.
 
+## Filtering on the table itself
+
+Every column in the results table has a filter box under its heading. They match against
+**what you can see in the cell**, which matters because several columns are not fields
+anywhere — the decoded route label, the findings, the suggested correction. Typing `county`
+under Findings finds every row with a county-code finding.
+
+| You type | You get |
+|---|---|
+| `SR1138` | rows whose cell contains it |
+| `!SR1138` | rows whose cell does **not** |
+| `-` | rows where the cell is empty |
+| `>100` | numeric columns: over 100 |
+| `<=0.5` | 0.5 or under |
+| `1-2` | between 1 and 2 |
+| `0.227` | that value, at three decimals |
+
+On **Offset ft** and **BH07 milepoint**, `-` means nothing was ever measured — useful for
+finding what Locate could not reach.
+
+Filters combine across columns, and the row count above the table tells you how many are on.
+**Export CSV takes the filtered rows, not the whole view** — filtering down to twelve rows and
+getting 1,282 in the file would be a trap. Clicking a heading still sorts; the boxes do not
+interfere. **Clear filters** in the left panel clears these too.
+
 ## On a phone
 
 The layout adapts below 860px. Three tabs — **Filters**, **Map**, **Results** — replace the

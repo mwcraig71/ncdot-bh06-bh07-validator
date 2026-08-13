@@ -1,6 +1,6 @@
 # Tests
 
-Five Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
+Six Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
 service and all six tile hosts — so none of them needs network access, and none of
 them can pass because a live service happened to answer.
 
@@ -11,6 +11,7 @@ node tests/basemap.test.js     dist/NCDOT_BH06_BH07_Validator.html
 node tests/corrections.test.js dist/NCDOT_BH06_BH07_Validator.html
 node tests/auth.test.js        dist/NCDOT_BH06_BH07_Validator.html
 node tests/features.test.js    dist/NCDOT_BH06_BH07_Validator.html
+node tests/columns.test.js     dist/NCDOT_BH06_BH07_Validator.html
 ```
 
 Each takes a build as its argument and should pass on all three: `dist/`, the
@@ -78,13 +79,21 @@ aimed at a named feature. Its last section feeds the tool the 24 September 2025 
 carried after three below features, R01 through R05 running straight across — and asserts that
 the tool flags the pattern instead of reproducing it.
 
-`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all five. It
+`columns.test.js` covers filtering on the table itself — a box under every column
+heading, matching against the text in the cell rather than against a field, which is
+the only way to reach the decoded label, the findings and the suggested correction.
+It asserts the comparison syntax on numeric columns (`>5`, `1-2`, `<=0.5`, `-` for
+nothing recorded), that a half-typed comparison hides nothing, that `!` excludes,
+that filters combine, and that the CSV exports what is on screen rather than the
+whole view.
+
+`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all six. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **74** features — 200 in all.
+corrections, **37** auth, **74** features, **21** columns — 221 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.
