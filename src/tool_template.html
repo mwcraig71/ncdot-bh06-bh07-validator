@@ -142,6 +142,12 @@ td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
   text-transform:uppercase;color:var(--info);background:var(--info-t);border:1px solid var(--info);
   padding:0 3px;margin-left:5px;vertical-align:1px;font-weight:600}
 .wasval{color:#9A9A9A;text-decoration:line-through}
+/* County names sit on whatever basemap is active, so they invert over aerial. */
+.cntylab{font-family:var(--font-h);font-size:10px;letter-spacing:.1em;text-transform:uppercase;
+  color:#1A1A1A;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;
+  white-space:nowrap;transform:translate(-50%,-50%)}
+body.on-imagery .cntylab{color:#fff;
+  text-shadow:0 0 3px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.85),0 0 5px rgba(0,0,0,.7)}
 
 /* ---------- drawer ---------- */
 #drawer{position:fixed;top:0;right:0;width:392px;max-width:94vw;height:100%;background:#fff;
@@ -339,9 +345,9 @@ td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
 <div class="toolbar">
   <span class="tb-lab">Scope</span>
   <select id="mode">
-    <option value="bridge">Single bridge</option>
+    <option value="bridge" selected>Single bridge</option>
     <option value="route">All bridges on a route</option>
-    <option value="county" selected>All bridges in a county</option>
+    <option value="county">All bridges in a county</option>
     <option value="all">All bridges statewide</option>
   </select>
   <span id="argwrap"></span>
@@ -913,22 +919,22 @@ const BASE={
    url:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'},
  esri_topo   :{grp:'Esri',lbl:'Topographic',host:'server.arcgisonline.com',max:19,attr:'Esri',
    url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}'},
- esri_imagery:{grp:'Esri',lbl:'Imagery',host:'server.arcgisonline.com',max:19,attr:'Esri',
+ esri_imagery:{grp:'Esri',lbl:'Imagery',host:'server.arcgisonline.com',max:19,attr:'Esri',img:true,
    url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'},
 
  esri2_street :{grp:'Esri mirror',lbl:'Street',host:'services.arcgisonline.com',max:19,attr:'Esri',
    url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}'},
- esri2_imagery:{grp:'Esri mirror',lbl:'Imagery',host:'services.arcgisonline.com',max:19,attr:'Esri',
+ esri2_imagery:{grp:'Esri mirror',lbl:'Imagery',host:'services.arcgisonline.com',max:19,attr:'Esri',img:true,
    url:'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'},
 
  usgs_topo   :{grp:'USGS National Map',lbl:'Topographic',host:'basemap.nationalmap.gov',max:16,attr:'USGS The National Map',
    url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}'},
- usgs_imagery:{grp:'USGS National Map',lbl:'Imagery',host:'basemap.nationalmap.gov',max:16,attr:'USGS/USDA The National Map',
+ usgs_imagery:{grp:'USGS National Map',lbl:'Imagery',host:'basemap.nationalmap.gov',max:16,attr:'USGS/USDA The National Map',img:true,
    url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'},
- usgs_imgtopo:{grp:'USGS National Map',lbl:'Imagery with roads',host:'basemap.nationalmap.gov',max:16,attr:'USGS The National Map',
+ usgs_imgtopo:{grp:'USGS National Map',lbl:'Imagery with roads',host:'basemap.nationalmap.gov',max:16,attr:'USGS The National Map',img:true,
    url:'https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}'},
 
- nc1_ortho   :{grp:'NC OneMap',lbl:'NC orthoimagery',host:'services.nconemap.gov',max:19,bounds:NCBOUNDS,
+ nc1_ortho   :{grp:'NC OneMap',lbl:'NC orthoimagery',host:'services.nconemap.gov',max:19,bounds:NCBOUNDS,img:true,
    attr:'NC Center for Geographic Information and Analysis',
    url:'https://services.nconemap.gov/secure/rest/services/Imagery/Orthoimagery_Latest_cached/ImageServer/tile/{z}/{y}/{x}'},
 
@@ -943,8 +949,10 @@ const BASE={
 };
 /* The order tried automatically when tiles do not arrive. Each step changes
    HOST, not just style — switching to another Esri layer on a blocked host
-   would only fail again. */
-const BASECHAIN=['esri_street','esri2_street','usgs_topo','carto_light','ncdot_roads'];
+   would only fail again. Aerial-first, to match the default: a blocked host
+   should cost you a provider, not the kind of map you were looking at. CARTO
+   publishes no imagery, so the last two are the plain-cartography backstops. */
+const BASECHAIN=['esri_imagery','esri2_imagery','usgs_imagery','carto_light','ncdot_roads'];
 if(typeof L==='undefined'){
   document.getElementById('map').innerHTML=
     '<div style="padding:38px;max-width:640px;font-size:13.5px;line-height:1.6">'+
@@ -957,7 +965,7 @@ if(typeof L==='undefined'){
   throw new Error('Leaflet unavailable');
 }
 const map=L.map('map',{preferCanvas:true,zoomControl:true}).setView([35.55,-79.4],7);
-let tileFails=0, tilesDead=false, tileOK=false, baseKey='esri_street';
+let tileFails=0, tilesDead=false, tileOK=false, baseKey='esri_imagery';
 const DEADHOST=new Set();          /* hosts this network has demonstrably blocked */
 
 /* NCDOT publishes no tile cache, so its basemap is rendered per tile from the
@@ -987,6 +995,19 @@ function makeBase(key){
   return t;
 }
 
+/* County outlines have to read against whatever is underneath. Near-black at 55%
+   disappears on aerial photography, so imagery gets white lines with a soft dark
+   halo and the county names invert to match. */
+function styleCounties(){
+  if(!countyLayer) return;
+  if(tilesDead){ countyLayer.setStyle({color:'#8C8C86',weight:1,fill:true,
+    fillColor:'#F7F7F3',fillOpacity:1,opacity:.9}); }
+  else if(BASE[baseKey]&&BASE[baseKey].img){ countyLayer.setStyle({color:'#FFFFFF',weight:1.4,
+    fill:false,opacity:.85}); }
+  else { countyLayer.setStyle({color:'#1A1A1A',weight:1,fill:false,opacity:.55}); }
+  document.body.classList.toggle('on-imagery',!tilesDead&&!!(BASE[baseKey]&&BASE[baseKey].img));
+}
+
 /* Swap the background without disturbing anything drawn on top of it. */
 function setBase(key){
   try{ map.removeLayer(baseLayer); }catch(e){}
@@ -994,8 +1015,8 @@ function setBase(key){
   baseLayer=makeBase(key).addTo(map); baseLayer.bringToBack();
   const sel=$('f-base'); if(sel) sel.value=key;
   if(tilesDead){ tilesDead=false; document.getElementById('map').style.background='';
-    const n=$('tilenote'); if(n) n.style.display='none';
-    if(countyLayer) countyLayer.setStyle({color:'#1A1A1A',weight:1,fill:false,opacity:.55}); }
+    const n=$('tilenote'); if(n) n.style.display='none'; }
+  styleCounties();
   if(typeof showBaseHost==='function') showBaseHost();
 }
 
@@ -1016,8 +1037,7 @@ function goTileless(){
      automatic chain may still be reachable. */
   try{ map.removeLayer(baseLayer); }catch(e){}
   document.getElementById('map').style.background='#EDEDE7';
-  if(countyLayer) countyLayer.setStyle({color:'#8C8C86',weight:1,fill:true,
-    fillColor:'#F7F7F3',fillOpacity:1,opacity:.9});
+  styleCounties();
   const n=$('tilenote'); if(n) n.style.display='block';
   toast('Every background tile source this tool knows about is blocked on this network, so the map is '+
     'drawing county outlines only. Bridges, checks and everything else are unaffected. Try another entry '+
@@ -1068,16 +1088,13 @@ async function loadCounties(force){
       COUNTIES[nm]=p.SapCountyId; CODE2CNTY[p.SapCountyId]=p.CountyName;
       if(p.FIPS!=null) SAP2FIPS[p.SapCountyId]=Number(p.FIPS);   /* HPMS keys on FIPS, NCDOT on SAP */
     });
-    countyLayer=L.geoJSON(gj,{style: tilesDead
-      ? {color:'#8C8C86',weight:1,fill:true,fillColor:'#F7F7F3',fillOpacity:1,opacity:.9}
-      : {color:'#1A1A1A',weight:1,fill:false,opacity:.55,interactive:false}});
+    countyLayer=L.geoJSON(gj,{interactive:false});
+    styleCounties();
     if(!$('l-county')||$('l-county').checked) countyLayer.addTo(map);
     gj.features.forEach(f=>{
       const c=L.geoJSON(f).getBounds().getCenter();
       labelLayer.addLayer(L.marker(c,{interactive:false,icon:L.divIcon({className:'',
-        html:'<div style="font-family:Oswald,sans-serif;font-size:10px;letter-spacing:.1em;'+
-        'text-transform:uppercase;color:#1A1A1A;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;'+
-        'white-space:nowrap;transform:translate(-50%,-50%)">'+esc(f.properties.CountyName)+'</div>'})}));
+        html:'<div class="cntylab">'+esc(f.properties.CountyName)+'</div>'})}));
     });
     const sel=$('f-county');
     while(sel.options.length>1) sel.remove(1);          /* idempotent on a forced re-pull */

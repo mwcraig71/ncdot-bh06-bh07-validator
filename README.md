@@ -101,6 +101,7 @@ tests/    request-counting cache suite and basemap-fallback suite (Playwright, a
 
 ## The background map has six sources, and needs only one
 
+It opens on Esri aerial imagery, and the fallback order is aerial-first.
 Agency networks block Esri's tile host often enough that treating it as the only option was a
 mistake. The tool now falls through six independent hosts — Esri, an Esri mirror, USGS National
 Map, NC OneMap, CARTO, and a road basemap rendered live off `gis11` — changing **host** at each

@@ -81,6 +81,10 @@ reachable**:
 | CARTO | `basemaps.cartocdn.com` |
 | NCDOT | `gis11.services.ncdot.gov` |
 
+The tool opens on **Esri imagery**, and the automatic fallback is aerial-first — a blocked host
+should cost you a provider, not the kind of map you were looking at. County outlines and names
+switch to white over any aerial basemap so they stay readable.
+
 That last row is the important one. NCDOT publishes no tile cache, so the tool renders a road
 basemap live from the same server the bridge data comes from — meaning **if the tool works at
 all, a background map is available**.

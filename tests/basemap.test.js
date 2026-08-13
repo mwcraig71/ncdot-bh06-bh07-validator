@@ -46,7 +46,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
     const g=await p.evaluate(()=>[...document.querySelectorAll('#f-base optgroup')].map(o=>o.label));
     console.log('  groups:'); g.forEach(x=>console.log('    '+x));
     ok('option count',await p.evaluate(()=>document.querySelectorAll('#f-base option').length),14);
-    ok('default selection',await p.evaluate(()=>document.getElementById('f-base').value),'esri_street');
+    ok('default selection',await p.evaluate(()=>document.getElementById('f-base').value),'esri_imagery');
     console.log('  host line: '+await p.evaluate(()=>document.getElementById('basehost').textContent));
     await p.close();
   }
@@ -68,10 +68,10 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
 
 
   let r;
-  r=await scenario('2. Esri blocked  ->  Esri mirror',['server.arcgisonline.com'],'esri2_street'); await r.p.close();
-  r=await scenario('3. Both Esri hosts blocked  ->  USGS',
-      ['server.arcgisonline.com','services.arcgisonline.com'],'usgs_topo'); await r.p.close();
-  r=await scenario('4. Esri + USGS blocked  ->  CARTO',
+  r=await scenario('2. Esri blocked  ->  Esri mirror (still imagery)',['server.arcgisonline.com'],'esri2_imagery'); await r.p.close();
+  r=await scenario('3. Both Esri hosts blocked  ->  USGS imagery',
+      ['server.arcgisonline.com','services.arcgisonline.com'],'usgs_imagery'); await r.p.close();
+  r=await scenario('4. Esri + USGS blocked  ->  CARTO (no aerial left)',
       ['server.arcgisonline.com','services.arcgisonline.com','basemap.nationalmap.gov'],'carto_light'); await r.p.close();
 
   r=await scenario('5. Everything external blocked  ->  NCDOT, off the data server itself',
