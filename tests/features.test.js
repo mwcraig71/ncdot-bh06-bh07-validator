@@ -278,8 +278,11 @@ const patchMock=()=>{
   await p2.selectOption('#arg','MECKLENBURG'); await p2.click('#run');
   await p2.waitForFunction(()=>ALL.length>0,null,{timeout:60000});
   await p2.evaluate(()=>loadSNBI()); await p2.waitForTimeout(2000);
-  ok('before opening it, only the published feature is known',
-     await p2.evaluate(()=>(ALL.find(x=>x.BRDG_NBR==='590819')._feat||[]).length||1),1);
+  const pre=await p2.evaluate(()=>featuresOf(ALL.find(x=>x.BRDG_NBR==='590819'))
+    .map(f=>f.des+':'+f.loc+':'+(f.rid||'—')));
+  console.log('   before opening: '+pre.join('  '));
+  ok('the carried feature and the named one below are known without measuring',pre.length,2);
+  ok('...and the named one has no route yet',/—$/.test(pre[1]),true);
   await p2.evaluate(()=>select('590819',true));
   await p2.waitForFunction(()=>{const x=ALL.find(y=>y.BRDG_NBR==='590819');return x&&x._featDone;},
     null,{timeout:40000});
@@ -288,7 +291,7 @@ const patchMock=()=>{
     return {n:(x._feat||[]).length, c:(x._feat||[]).filter(f=>f.loc==='C').length,
             u:(x._feat||[]).filter(f=>f.loc==='B').length,
             txt:document.getElementById('dr-body').innerText};});
-  ok('opening it measured the rest',auto.n>1,true);
+  ok('opening it resolved that one and found the rest',auto.n>2,true);
   console.log('   '+auto.c+' carried, '+auto.u+' below, without touching Expand features');
   ok('...and the panel shows them',/below bridge/i.test(auto.txt),true);
   ok('the count in the header is right',
@@ -298,6 +301,63 @@ const patchMock=()=>{
        const n=(x._feat||[]).length; select('590819',true);
        await new Promise(r=>setTimeout(r,600));
        return (x._feat||[]).length===n;}),true);
+
+  console.log('\n13b. Feature Crossed is a list of features, not an absence of them');
+  const named=await p2.evaluate(()=>{
+    const g=n=>{const b=ALL.find(x=>x.BRDG_NBR===n);
+      return {txt:b.FTR_INTRSC, under:b.SERVICEUNDER,
+              f:(featuresOf(b)).map(x=>({des:x.des,loc:x.loc,name:x.name,named:!!x.named,
+                                         resolved:!!x.resolved,rid:x.rid}))};};
+    return {a:g('590668'), b:g('590207')};});
+  console.log('   590668 Feature Crossed "'+named.a.txt+'" -> '+
+     named.a.f.filter(f=>f.loc==='B').map(f=>f.des+' '+f.name).join(', '));
+  ok('a named road below is a feature before anything is measured',
+     named.a.f.some(f=>f.loc==='B'&&f.named),true);
+  ok('...and it is the primary below feature',
+     (named.a.f.find(f=>f.loc==='B')||{}).named,true);
+  const water=await p2.evaluate(()=>{
+    const b={BRDG_NBR:'X',F_CARRIED:'SR1138 WBL',RTE_ID:'40401138060',MP:0.227,
+             FTR_INTRSC:'SUGAR CREEK',SERVICEUNDER:'5'};
+    return baseFeatures(b).map(f=>f.loc).join('');});
+  ok('a creek is not a highway feature',water,'C');
+  const multi=await p2.evaluate(()=>{
+    const b={BRDG_NBR:'Y',F_CARRIED:'US74 WBL',RTE_ID:'20600074060',MP:1,
+             FTR_INTRSC:'I277,NC16,NC27,US74 SBL',SERVICEUNDER:'1'};
+    return baseFeatures(b).map(f=>f.des+':'+f.loc+':'+f.name).join(' | ');});
+  console.log('   "I277,NC16,NC27,US74 SBL" -> '+multi);
+  ok('four named roads below give four features',multi.split('|').length,5);
+  const amp=await p2.evaluate(()=>{
+    const b={BRDG_NBR:'Z',F_CARRIED:'DAVIDSON STREET',RTE_ID:'',MP:null,
+             FTR_INTRSC:'I277 & NC16',SERVICEUNDER:'1'};
+    return baseFeatures(b).filter(f=>f.loc==='B').map(f=>f.name).join(',');});
+  ok('an ampersand separates them too',amp,'I277,NC16');
+  const mixed=await p2.evaluate(()=>{
+    const b={BRDG_NBR:'W',F_CARRIED:'X',RTE_ID:'',MP:null,
+             FTR_INTRSC:'ACCESS RD.,HOMINY CREEK',SERVICEUNDER:'6'};
+    return baseFeatures(b).filter(f=>f.loc==='B').map(f=>f.name).join(',');});
+  ok('a road and a creek together keeps only the road',mixed,'ACCESS RD.');
+
+  console.log('\n13c. Named vs measured is reconciled, both ways');
+  const rec=await p2.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    return {txt:b.FTR_INTRSC, f:(b._feat||[]).filter(x=>x.loc==='B')
+      .map(x=>({des:x.des,name:x.name,rid:x.rid,named:!!x.named,resolved:!!x.resolved,
+                flags:(x.flags||[]).filter(y=>/FEATURE_/.test(y))}))};});
+  console.log('   590819 Feature Crossed "'+rec.txt+'"');
+  rec.f.forEach(f=>console.log('     '+f.des+'  '+(f.rid||'—')+'  named='+f.named+
+     '  resolved='+f.resolved+'  '+f.flags.join(',')+'   '+f.name));
+  ok('the road NCDOT named was resolved to an LRS route',
+     rec.f.some(f=>f.named&&f.resolved&&/^\d{11}$/.test(f.rid||'')),true);
+  ok('roads found but not named are reported as missing features',
+     rec.f.some(f=>f.named===false&&f.flags.includes('FEATURE_NOT_NAMED')),true);
+  ok('the missing-feature rule points at private and municipal routes',
+     await p2.evaluate(()=>/class 5|private/i.test(RULEMAP.FEATURE_NOT_NAMED.d)),true);
+  ok('the unresolved rule says a private road has no LRS route at all',
+     await p2.evaluate(()=>/private/i.test(RULEMAP.FEATURE_UNRESOLVED.d)),true);
+  ok('an unresolved feature is still reported, not dropped',
+     await p2.evaluate(()=>{
+       const b=ALL.find(x=>x.BRDG_NBR==='590668');
+       const u=(b._feat||[]).filter(f=>f.loc==='B'&&f.named&&!f.resolved);
+       return u.every(f=>!!f.des);}),true);
 
   console.log('\n14. The pin drop is a measurement, not the bridge\'s BH06');
   const pin=await p2.evaluate(()=>{

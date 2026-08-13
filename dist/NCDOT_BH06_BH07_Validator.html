@@ -1398,6 +1398,10 @@ const RULES=[
   d:'Two features on this structure share a location and resolve to the same LRS route. Co-signed routes on one deck — I-77 and US-21 on the same superstructure — are ROUTE records under a single feature, and get a single BH06/BH07 pair. Split into separate features they report the same length of road twice.'},
  {id:'TWIN_STRUCTURE', grp:'note', sev:'i', t:'One of a sister pair',
   d:'Another bridge number sits within 250 ft carrying the opposing direction of the same facility — same class and number, different inventory digit. Each has its own deck, so neither is a feature of the other however close they sit. This is recorded because the exclusion it drives would otherwise be invisible: a road correctly refused looks exactly like a road never found.'},
+ {id:'FEATURE_UNRESOLVED', grp:'qc', sev:'w', t:'Feature named, but no LRS route found',
+  d:'NCDOT names this roadway in Feature Crossed, so it is a feature of this structure and has to be reported — but nothing in the road network under the deck answers to that name, so it has no LRS route ID or milepoint yet. The feature is reported regardless; nothing is dropped for being unresolved. Before treating it as an error, check whether it is a private drive, a parking-lot access or a municipal street: the LRS carries state-system routes, so a private road legitimately has no route ID at all and never will.'},
+ {id:'FEATURE_NOT_NAMED', grp:'qc', sev:'w', t:'Roadway found beneath, not named in Feature Crossed',
+  d:'A road passes under this deck at the angle the recorded skew predicts, and NCDOT\u2019s Feature Crossed text does not mention it — so the features list is short by one. 590819 is the plain case: the text says only "I485" while two carriageways and two ramps run beneath. Confirm before adding it. If the route decodes as class 5 (municipal or private), it may have been left out on purpose, because a private road is not a state-system feature.'},
  {id:'FEATURE_LOW_CONF', grp:'note', sev:'i', t:'Feature found without deck dimensions',
   d:'The structure records no length, deck width or skew, so this feature was admitted on a plain radius rather than on the deck footprint and the crossing angle. That is the test that cannot separate a road beneath from a road alongside. Confirm it before submitting.'}
 ];
@@ -2843,12 +2847,44 @@ function renumberFeatures(list){
   return list;
 }
 
-/* What the published inventory alone can tell us: one carried roadway. */
+/* Things Feature Crossed names that are not roadways. A bridge over a creek has
+   an intersected feature, but not a HIGHWAY one, and it gets no B.H record. */
+const NOT_A_ROADWAY=/CREEK|RIVER|BRANCH|\bRUN\b|SWAMP|CANAL|LAKE|POND|RESERVOIR|DITCH|SLOUGH|\bBAY\b|SOUND|RAILROAD|RAILRD|\bR\.?R\.?\b|\bNS\b|CSX|NORFOLK|SOUTHERN R|PEDESTRIAN|GREENWAY|TRAIL|CONVEYOR|UTILITY|PIPE/i;
+const ROUTE_TOKEN=/(^|[^A-Z])(I|US|NC|SR)[\s-]?\d/i;
+
+/* NCDOT names what is under the structure, in Feature Crossed, on the row we
+   already have. 6,235 structures report a highway below and 5,967 of them name
+   it. Those features exist whether or not anything has been measured yet, and
+   they have to be reported with the bridge — so they are built here, on load,
+   and the spatial pass resolves them to an LRS route rather than discovering
+   them. What NCDOT does not supply for them is the route ID and the milepoint,
+   which is a different thing from not supplying the feature. */
+function namedBelow(b){
+  const txt=String(b.FTR_INTRSC||'').trim();
+  if(!txt) return [];
+  const hwyUnder=['1','4','6'].includes(String(b.SERVICEUNDER||'').trim());
+  return txt.split(/\s*(?:,|;|\/|&|\band\b)\s*/i)
+    .map(x=>x.trim()).filter(Boolean)
+    .filter(x=>{
+      if(NOT_A_ROADWAY.test(x)) return false;        /* a creek is not a highway feature */
+      if(ROUTE_TOKEN.test(x)) return true;           /* named route: a roadway whatever the codes say */
+      return hwyUnder;                               /* "DAVIDSON STREET" under ServiceUnder 1 */
+    })
+    .map((name,i)=>({des:'',loc:'B',primary:false,name,rid:null,mp:null,
+                     origin:'published inventory: Feature Crossed',
+                     named:true,resolved:false,_ord:i+1,
+                     routes:routesFor(name,null)}));
+}
+
+/* What the published inventory tells us on its own: the carried roadway, and
+   every roadway NCDOT names beneath it. */
 function baseFeatures(b){
   const f={des:'H01',seq:1,loc:'C',primary:true,name:b.F_CARRIED||'',
            rid:b.RTE_ID,mp:b.MP,origin:'published inventory',_ord:0,
            routes:routesFor(b.F_CARRIED,b.RTE_ID)};
-  return [f];
+  const below=namedBelow(b);
+  if(below.length) below[0].primary=true;
+  return renumberFeatures([f].concat(below));
 }
 function featuresOf(b){ if(!b._feat) b._feat=baseFeatures(b); return b._feat; }
 
@@ -2919,6 +2955,10 @@ function validateFeature(b,f){
   if(/^\d{11}$/.test(rid)&&ROUTEASKED.has(rid)&&!ROUTELEN[rid]) flags.push('ROUTE_NOT_FOUND');
   if(f.src==='REVIEWED') flags.push('REVIEWED_VALUE');
   if(f.confidence==='low') flags.push('FEATURE_LOW_CONF');
+  /* Named by NCDOT, but nothing in the LRS answers to that name here. */
+  if(f.loc==='B'&&f.named&&b._featDone&&!f.resolved) flags.push('FEATURE_UNRESOLVED');
+  /* Measured under the deck, but Feature Crossed does not mention it. */
+  if(f.loc==='B'&&f.named===false) flags.push('FEATURE_NOT_NAMED');
 
   f.flags=flags; f._dec=d;
   f.sev=flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='e')?'e'
@@ -2993,29 +3033,43 @@ async function expandOne(b,tally){
       const own=effRid(b);
       const ctx=deckContext(b,(cand.get(own)||{}).paths||[]);
       const list=baseFeatures(b);
-      let ord=1;
+      let ord=list.length;
       cand.forEach((v,rid)=>{
         if(rid===own) return;
         const cl=classifyCandidate(b,rid,v.paths,ctx);
         if(cl.verdict==='reject'){ if(cl.neighbour) t.ruled++; return; }
         const m=mAtPoint(v.paths,ctx.cx,ctx.cy);
-        const f={des:'', loc:cl.verdict==='carried'?'C':'B', primary:false,
-                 name:v.street||v.name||'', rid, mp:m&&m.m!=null?Math.round(m.m*1000)/1000:null,
-                 off:m?m.d:null, origin:'derived: '+(cl.admittedBy||''),
+        const mp=m&&m.m!=null?Math.round(m.m*1000)/1000:null;
+        const d=decodeRID(rid);
+
+        /* Does this measured road answer to one of the names NCDOT already gave
+           us? If so it RESOLVES that feature rather than adding another. This is
+           the check the old design could not make, because it had thrown the
+           names away. */
+        const match = cl.verdict!=='carried' && list.find(f=>
+          f.loc==='B' && f.named && !f.resolved &&
+          d && carriedTokens(f.name).includes(d.label));
+        if(match){
+          match.rid=rid; match.mp=mp; match.off=m?m.d:null; match.resolved=true;
+          match.confidence=cl.confidence; match.angle=cl.angle; match.expected=cl.expected;
+          match.why=cl.why; match.origin='NCDOT names it; route measured against the road network';
+          match.routes=routesFor(match.name,rid);
+          t.under++; if(cl.confidence==='low') t.low++;
+          return;
+        }
+        list.push({des:'', loc:cl.verdict==='carried'?'C':'B', primary:false,
+                 name:v.street||v.name||'', rid, mp, off:m?m.d:null,
+                 origin:'measured, not named in Feature Crossed',
                  confidence:cl.confidence, angle:cl.angle, expected:cl.expected,
-                 why:cl.why, needsReview:cl.verdict==='review', _ord:++ord,
-                 routes:routesFor(v.name||v.street||'',rid)};
-        list.push(f);
+                 why:cl.why, needsReview:cl.verdict==='review',
+                 named:false, resolved:true, _ord:++ord,
+                 routes:routesFor(v.name||v.street||'',rid)});
         if(cl.verdict==='under') t.under++; else if(cl.verdict==='carried') t.carried++;
         if(cl.verdict==='review') t.review++;
         if(cl.confidence==='low') t.low++;
       });
-      /* The primary below feature is the widest-carrying road beneath — in
-         practice the one the inspector named in Feature Intersected. */
-      const toks=carriedTokens(b.FTR_INTRSC);
       const below=list.filter(f=>f.loc==='B');
-      const named=below.find(f=>{const d=decodeRID(f.rid); return d&&toks.includes(d.label);});
-      (named||below[0]||{}).primary=true;
+      if(below.length&&!below.some(f=>f.primary)) below[0].primary=true;
       b._feat=renumberFeatures(list);
       b._featDone=true;
       rollUpFeatures(b);
@@ -3470,14 +3524,19 @@ function featurePanel(b){
     h+='<div class="find w"><b>Could not measure the features</b>'+esc(b._featErr)+
       '. The published carried feature is shown; anything below this structure is unknown until the road '+
       'network answers. Try <b>Expand features</b> in Settings.</div>';
-  } else if(fs.length===1&&!fs[0].origin.startsWith('derived')&&!b._featDone){
-    h+='<div class="find" style="border-left-color:#9A9A9A;background:#F4F4F4"><b>Only the published feature</b>'+
-      'NCDOT’s submittal holds no intersected features, so nothing below this structure is known yet. '+
-      'Run <b>Expand features</b> to measure them against the road network.</div>';
-  } else if(fs.filter(f=>f.loc==='B').length===0&&b._featDone){
+  } else if(!b._featDone&&fs.some(f=>f.loc==='B')){
+    h+='<div class="find" style="border-left-color:#9A9A9A;background:#F4F4F4"><b>Named, not yet measured</b>'+
+      'NCDOT names '+fs.filter(f=>f.loc==='B').length+' roadway'+(fs.filter(f=>f.loc==='B').length===1?'':'s')+
+      ' beneath this structure in Feature Crossed &mdash; <span class="mono">'+esc(b.FTR_INTRSC||'')+
+      '</span>. They are features of this bridge and are reported with it. Their LRS route and milepoint '+
+      'are measured when you open the structure.</div>';
+  } else if(fs.filter(f=>f.loc==='B').length===0){
     h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6"><b>Nothing beneath it</b>'+
-      'Measured against the road network: no roadway passes under this structure. It spans something '+
-      'that is not a road — water, a railway, or open ground.</div>';
+      (b.FTR_INTRSC
+        ? 'Feature Crossed reads <span class="mono">'+esc(b.FTR_INTRSC)+'</span>, which is not a roadway, and '+
+          (b._featDone?'nothing measured under the deck is one either. ':'')
+        : 'NCDOT names nothing under this structure. ')+
+      'It spans water, a railway or open ground, so it has no highway feature below and no BH07 to report for one.</div>';
   }
   fs.forEach(f=>{
     const rid=effRidF(b,f), n=mp3(effMpF(b,f)), d=decodeRID(rid);
@@ -3495,9 +3554,14 @@ function featurePanel(b){
                               : '<span style="color:#5A5A5A">not reported (B.F.02 = B)</span>')
             : (rid&&rid!=='NA'? esc(rid)+((rv.fix06!=null&&String(rv.fix06).trim()!=='')?SRCTAG:'')
                               : '<span style="color:#CF3910">not assigned</span>'))+
+          (f.loc==='B'&&f.named?'<div style="color:#5A5A5A;font-size:11.5px">named by NCDOT in Feature Crossed'+
+             (f.resolved?', resolved to '+esc(f.rid||''):'')+'</div>':'')+
+          (f.named===false?'<div style="color:#C9A227;font-size:11.5px">measured here, not named in Feature Crossed</div>':'')+
           (d?'<div style="color:#5A5A5A;font-size:11.5px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
         '</dd>'+
-        '<dt>BH07</dt><dd class="mono">'+(n===null?'<span style="color:#CF3910">not assigned</span>'
+        '<dt>BH07</dt><dd class="mono">'+(n===null?(f.named&&!f.resolved
+              ?'<span style="color:#5A5A5A">'+(b._featDone?'no LRS route found for this name':'not measured yet')+'</span>'
+              :'<span style="color:#CF3910">not assigned</span>')
             :n.toFixed(3)+((rv.fix07!=null&&String(rv.fix07).trim()!=='')?SRCTAG:''))+
           (f.off!=null?'<div style="color:'+(f.off>TOLFT?'#CF3910':'#2E7D32')+';font-size:11.5px">'+
             Math.round(f.off).toLocaleString()+' ft from the structure</div>':'')+'</dd>'+
