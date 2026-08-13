@@ -451,6 +451,39 @@ value that belongs on somebody else's record.
 two route records and one BH06/BH07 pair. Reported as two features, the state reports the same
 length of road twice.
 
+### Triage — which bridges actually need you
+
+NCDOT names N roadways beneath; the tool measures M. What matters is whether they agree, and for
+most bridges they do. The **Features** filter in the left panel sorts the whole county by that:
+
+| | |
+|---|---|
+| **Lists agree** | every named roadway found, nothing else beneath. Nothing to do. |
+| **Named ones found** | the named roadways now have routes and milepoints; nothing has looked for unnamed ones yet. |
+| **Feature list is short** | a roadway passes beneath that Feature Crossed does not name. |
+| **Named, not found** | NCDOT names a roadway nothing in the LRS answers to — often a private drive. |
+| **Both ways** | both of the above on one structure. |
+| **Highway below, unnamed** | ServiceUnder says a highway is beneath and the text names nothing. Measurement is the only source these will ever have. |
+
+Pick **Anything needing a look** to get just the disagreements. That is the work queue, and it is
+far shorter than the list of bridges with roadways beneath.
+
+One thing to expect: a **divided highway beneath is two roadways**, each with its own clearances
+and traffic, and Feature Crossed almost always names it once — "US74" over two carriageways,
+"I485" over two. The tool marks the second one as a carriageway of a road already named rather
+than as a missing road, so it does not crowd out the genuine omissions.
+
+### Two ways to fill in a roadway the tool cannot resolve
+
+**Resolve named features** (Settings) pulls only the routes NCDOT names beneath the bridges in
+your scope — 40 routes covers all of Mecklenburg — and resolves them in one pass, in seconds,
+rather than querying once per bridge.
+
+**The pin drop, aimed at a feature.** Open a bridge, find a roadway beneath with no route, and
+click *Pick this roadway on the map*. The pin arms, you click the road where it runs under the
+bridge, and NCDOT's own route/milepost tool fills that feature in — recorded with your name and
+the date, so an export can say where the number came from.
+
 ### Two things NCDOT's own reports get wrong
 
 **Carried features come first.** Every carried roadway is numbered before the first roadway

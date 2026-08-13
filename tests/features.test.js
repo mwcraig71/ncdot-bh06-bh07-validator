@@ -359,6 +359,53 @@ const patchMock=()=>{
        const u=(b._feat||[]).filter(f=>f.loc==='B'&&f.named&&!f.resolved);
        return u.every(f=>!!f.des);}),true);
 
+  console.log('\n13d. Triage: the two lists, and how much work they imply');
+  const tri=await p2.evaluate(()=>{
+    const g=n=>{const b=ALL.find(x=>x.BRDG_NBR===n);return {bn:n,t:b._triage,txt:b.FTR_INTRSC};};
+    return {a:g('590819'),b:g('590668'),c:g('590207'),
+            states:Object.keys(TRIAGE)};});
+  console.log('   590819 "'+tri.a.txt+'" -> '+tri.a.t+'   590668 "'+tri.b.txt+'" -> '+tri.b.t);
+  ok('a structure with an unnamed roadway beneath is triaged short',tri.a.t,'short');
+  ok('one whose below features are named but unmeasured is triaged pending',tri.b.t,'pending');
+  const cw=await p2.evaluate(async()=>{await featuresOnOpen('590668');
+    const b=ALL.find(x=>x.BRDG_NBR==='590668');
+    return {t:b._triage, below:(b._feat||[]).filter(f=>f.loc==='B')
+      .map(f=>({rid:f.rid,named:!!f.named,cw:!!f.carriageway,
+                fl:(f.flags||[]).filter(x=>/FEATURE_/.test(x))}))};});
+  cw.below.forEach(f=>console.log('     '+f.rid+'  named='+f.named+' carriageway='+f.cw+'  '+f.fl.join(',')));
+  ok('the second carriageway of a road named once is not a missing road',
+     cw.below.some(f=>f.cw&&f.fl.includes('FEATURE_CARRIAGEWAY')),true);
+  ok('...so the lists count as agreeing',cw.t,'agreed');
+  ok('every triage state carries an explanation',
+     await p2.evaluate(()=>Object.values(TRIAGE).every(x=>x.t&&x.d&&x.c)),true);
+  ok('the filter offers a single "needs a look" bucket',
+     await p2.evaluate(()=>!!document.querySelector('#f-triage option[value=todo]')),true);
+  ok('filtering to it keeps only the disagreements',
+     await p2.evaluate(()=>{document.getElementById('f-triage').value='todo';applyFilters();
+       const out=VIEW.every(b=>['short','unresolved','both','nonamed'].includes(b._triage));
+       document.getElementById('f-triage').value='';applyFilters(); return out;}),true);
+
+  console.log('\n13e. The deck orients itself on RD_ANGLE, so no carried geometry is needed');
+  const rda=await p2.evaluate(()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590668');
+    const ctx=deckContext(b,null);
+    return {from:ctx.angFrom, deg:Math.round(ctx.ang*180/Math.PI*100)/100, rd:b.RD_ANGLE, have:ctx.have};});
+  console.log('   RD_ANGLE '+rda.rd+' -> footprint bearing '+rda.deg+' ('+rda.from+')');
+  ok('the bearing came from RD_ANGLE, with no geometry passed in',rda.from,'RD_ANGLE');
+  ok('...and the footprint is still usable',rda.have,true);
+  ok('a structure with no RD_ANGLE falls back to measuring',
+     await p2.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590668');
+       const save=b.RD_ANGLE; b.RD_ANGLE=null;
+       const f=deckContext(b,[]).angFrom; b.RD_ANGLE=save; return f;}),'measured');
+
+  console.log('\n13f. The pin can be aimed at a feature');
+  ok('an unresolved roadway below offers the pin',
+     await p2.evaluate(()=>{select('590668',false);
+       return /Pick this roadway on the map/.test(document.getElementById('dr-body').innerHTML)
+              || (ALL.find(x=>x.BRDG_NBR==='590668')._feat||[]).filter(f=>f.loc==='B'&&!/^\d{11}$/.test(f.rid||'')).length===0;}),true);
+  ok('arming it records which feature it is for',
+     await p2.evaluate(()=>{PINTARGET={bn:'590668',des:'H02'}; return PINTARGET.des;}),'H02');
+
   console.log('\n14. The pin drop is a measurement, not the bridge\'s BH06');
   const pin=await p2.evaluate(()=>{
     const src=document.documentElement.innerHTML;

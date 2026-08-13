@@ -73,7 +73,8 @@ and that the pin-drop popup no longer labels its answer "BH06 LRS Route ID" — 
 at the clicked point, which at a grade separation is usually not the road the bridge carries, and
 it says which of the open bridge's features that road is.
 
-Its last section feeds the tool the 24 September 2025 inspection report's own numbering — H05
+It covers the triage states, the RD_ANGLE orientation, and the pin drop being
+aimed at a named feature. Its last section feeds the tool the 24 September 2025 inspection report's own numbering — H05
 carried after three below features, R01 through R05 running straight across — and asserts that
 the tool flags the pattern instead of reproducing it.
 
@@ -83,7 +84,7 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **62** features — 188 in all.
+corrections, **37** auth, **74** features — 200 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

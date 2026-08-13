@@ -1084,6 +1084,16 @@ body.on-imagery .cntylab{color:#fff;
     <div class="sec">
       <h3>Filters</h3>
       <div class="f-row"><label>Search</label><input type="text" id="f-q" placeholder="bridge no, carried, crossed"></div>
+      <div class="f-row"><label>Features</label><select id="f-triage"><option value="">All</option>
+        <option value="short">Feature list is short</option>
+        <option value="resolved">Named ones found</option>
+        <option value="unresolved">Named, not found</option>
+        <option value="both">Both ways</option>
+        <option value="nonamed">Highway below, unnamed</option>
+        <option value="todo">Anything needing a look</option>
+        <option value="agreed">Lists agree</option>
+        <option value="pending">Not measured yet</option>
+        <option value="none">No roadway beneath</option></select></div>
       <div class="f-row"><label>County</label><select id="f-county"><option value="">All</option></select></div>
       <div class="f-row"><label>Division</label><select id="f-div"><option value="">All</option></select></div>
       <div class="f-row"><label>Rte class</label><select id="f-class"><option value="">All</option></select></div>
@@ -1212,7 +1222,8 @@ body.on-imagery .cntylab{color:#fff;
           <button class="btn ghost" id="locate" disabled>Locate</button>
           <button class="btn ghost" id="resolve" disabled>Resolve carried</button>
           <button class="btn ghost" id="fillnull" disabled>Fill missing</button>
-          <button class="btn ghost" id="expandfeat" disabled title="Finds the roadways beneath each structure, which NCDOT's submittal does not hold">Expand features</button>
+          <button class="btn ghost" id="resolvenamed" disabled title="Pulls only the routes NCDOT names beneath these bridges, and resolves them all in one pass">Resolve named features</button>
+          <button class="btn ghost" id="expandfeat" disabled title="The full sweep: also finds roadways NCDOT does not name. One query per structure.">Expand features</button>
           <button class="btn ghost" id="snbibtn" disabled>SNBI data</button>
         </div>
       </div>
@@ -1314,7 +1325,7 @@ const ROADCHAR=SVC+'/NCDOT_RoadCharacteristicsQtr/MapServer/0';
 const COUNTYBDY=SVC+'/NCDOT_CountyBdy_Poly/MapServer/0';
 const STRUCT=SVC+'/NCDOT_Structures/NCDOT_DynamicStructures/MapServer';
 const GPTOOL=SVC+'/NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool';
-const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT';
+const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,RD_ANGLE,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT';
 
 const CLASS={'1':{p:'I',n:'Interstate'},'2':{p:'US',n:'US Route'},'3':{p:'NC',n:'NC Route'},
   '4':{p:'SR',n:'Secondary route'},'5':{p:'NS',n:'Non-system (municipal/private)'},
@@ -1400,6 +1411,8 @@ const RULES=[
   d:'Another bridge number sits within 250 ft carrying the opposing direction of the same facility — same class and number, different inventory digit. Each has its own deck, so neither is a feature of the other however close they sit. This is recorded because the exclusion it drives would otherwise be invisible: a road correctly refused looks exactly like a road never found.'},
  {id:'FEATURE_UNRESOLVED', grp:'qc', sev:'w', t:'Feature named, but no LRS route found',
   d:'NCDOT names this roadway in Feature Crossed, so it is a feature of this structure and has to be reported — but nothing in the road network under the deck answers to that name, so it has no LRS route ID or milepoint yet. The feature is reported regardless; nothing is dropped for being unresolved. Before treating it as an error, check whether it is a private drive, a parking-lot access or a municipal street: the LRS carries state-system routes, so a private road legitimately has no route ID at all and never will.'},
+ {id:'FEATURE_CARRIAGEWAY', grp:'note', sev:'i', t:'Second carriageway of a roadway NCDOT names once',
+  d:'A divided highway passing beneath is two roadways, not one. Each carriageway is its own feature with its own vertical clearance, lanes and traffic — the inspection report for 590819 lists I485N and I485S separately — but Feature Crossed names the road once, "I485" or "US74". So this is a shorthand in the text rather than a road nobody noticed, and it is separated from the genuine omissions so that the work queue stays worth reading.'},
  {id:'FEATURE_NOT_NAMED', grp:'qc', sev:'w', t:'Roadway found beneath, not named in Feature Crossed',
   d:'A road passes under this deck at the angle the recorded skew predicts, and NCDOT\u2019s Feature Crossed text does not mention it — so the features list is short by one. 590819 is the plain case: the text says only "I485" while two carriageways and two ramps run beneath. Confirm before adding it. If the route decodes as class 5 (municipal or private), it may have been left out on purpose, because a private road is not a state-system feature.'},
  {id:'FEATURE_LOW_CONF', grp:'note', sev:'i', t:'Feature found without deck dimensions',
@@ -1412,6 +1425,7 @@ const SEVNAME={e:'Error',w:'Warning',i:'Note',ok:'Clean'};
 /* ---------- state ---------- */
 let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN={}, DEEP=false;
 let LASTIMPORT={unmapped:[],at:0};   /* what the last review-file import could not place */
+let PINTARGET=null;                  /* {bn,des} — the feature a pin drop should fill */
 let REVIEW=new Map(), REVDIRTY=false;
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
@@ -1989,6 +2003,7 @@ async function run(){
     $('snbibtn').classList.toggle('on',ALL.some(b=>b._snbi));
     $('fillnull').disabled=ALL.length===0;
     $('expandfeat').disabled=ALL.length===0;
+    $('resolvenamed').disabled=ALL.length===0;
     $('csv').disabled=ALL.length===0;
     if(!ALL.length) toast('Nothing matched that query.',4000);
   }catch(e){ busy(false); toast('Query failed: '+e.message,6000); }
@@ -2492,13 +2507,25 @@ function classifyCandidate(b,rid,paths,ctx){
   return out;
 }
 
-/* Everything a classification needs about the structure itself, built once. */
+/* Everything a classification needs about the structure itself, built once.
+
+   The deck's bearing does not have to be measured: the bridge layer publishes
+   RD_ANGLE, and it is the bearing of the road carried, in the same convention
+   as the principal axis this file computes. Checked against measured geometry
+   on 13 Mecklenburg structures — median disagreement 0.37 degrees, worst 6.4,
+   none over 10 — and it is populated on 19,740 of the 19,741 structures that
+   carry a highway.
+
+   That matters for more than tidiness. With RD_ANGLE the footprint needs no
+   road geometry at all to orient itself, so resolving a structure's features
+   no longer requires pulling the route it carries. */
 function deckContext(b,carriedPaths){
   const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
   const dim=deckDims(b);
-  const ang=localBearing(carriedPaths,sp.x,sp.y);
+  const rd=Number(b.RD_ANGLE);
+  const ang=(isFinite(rd)&&rd!==0) ? rd*Math.PI/180 : localBearing(carriedPaths||[],sp.x,sp.y);
   const ctx={cx:sp.x,cy:sp.y,ang:ang==null?0:ang,skew:dim.skew,have:dim.have&&ang!=null,
-             len:dim.len,wid:dim.wid};
+             len:dim.len,wid:dim.wid,angFrom:(isFinite(rd)&&rd!==0)?'RD_ANGLE':'measured'};
   ctx.poly = ctx.have
     ? deckRect(sp.x,sp.y,ctx.ang,dim.len,dim.wid+DECK_PAD_FT)
     /* No dimensions, or no carried geometry to orient against: fall back to the
@@ -2957,8 +2984,19 @@ function validateFeature(b,f){
   if(f.confidence==='low') flags.push('FEATURE_LOW_CONF');
   /* Named by NCDOT, but nothing in the LRS answers to that name here. */
   if(f.loc==='B'&&f.named&&b._featDone&&!f.resolved) flags.push('FEATURE_UNRESOLVED');
-  /* Measured under the deck, but Feature Crossed does not mention it. */
-  if(f.loc==='B'&&f.named===false) flags.push('FEATURE_NOT_NAMED');
+  /* Measured under the deck, but Feature Crossed does not mention it — and
+     there are two quite different reasons for that. A divided highway beneath
+     is TWO roadways, each with its own clearances and its own traffic, and the
+     text almost always names it once: "US74" over two carriageways, "I485" over
+     two. That is a naming shorthand, not a missing road, and it should not
+     compete for attention with a road nobody mentioned at all. */
+  if(f.loc==='B'&&f.named===false){
+    const d0=decodeRID(rid);
+    const namedLabels=featuresOf(b).filter(x=>x.loc==='B'&&x.named)
+      .flatMap(x=>carriedTokens(x.name));
+    f.carriageway = !!(d0&&namedLabels.includes(d0.label));
+    flags.push(f.carriageway?'FEATURE_CARRIAGEWAY':'FEATURE_NOT_NAMED');
+  }
 
   f.flags=flags; f._dec=d;
   f.sev=flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='e')?'e'
@@ -2995,10 +3033,52 @@ function checkFeatureStructure(b){
   return out;
 }
 
+/* ---- triage ----------------------------------------------------------------
+   The question that decides the workload is not "what is under this bridge" but
+   "do the two lists agree". NCDOT names N roadways beneath; the measurement
+   finds M. Where they agree there is nothing for a person to do, and most
+   structures agree. Where they do not, that IS the work queue — and it is far
+   smaller than the 6,190 structures that have below features at all.
+
+   The states are deliberately about the DISAGREEMENT, not about the values. A
+   wrong milepoint on a resolved feature is an ordinary finding; a feature
+   nobody can account for is a different kind of problem. */
+const TRIAGE={
+  none:      {t:'No roadway beneath',   c:'#9A9A9A', d:'NCDOT names nothing below and nothing is expected. It spans water, a railway or open ground.'},
+  pending:   {t:'Named, not measured',  c:'#5A5A5A', d:'NCDOT names the roadways beneath. Their LRS route and milepoint have not been measured yet — open the structure, or run Resolve named features.'},
+  agreed:    {t:'Lists agree',          c:'#2E7D32', d:'Every roadway NCDOT names beneath was found under the deck, and nothing else was. Nothing to reconcile here.'},
+  resolved:  {t:'Named ones found',     c:'#1E56B3', d:'Every roadway NCDOT names beneath now has an LRS route and a milepoint. Nothing has yet looked for roadways NCDOT did not name — open the structure, or run the full sweep.'},
+  short:     {t:'Feature list is short',c:'#C9A227', d:'A roadway passes under this deck that Feature Crossed does not name. The features list is missing one.'},
+  unresolved:{t:'Named, not found',     c:'#C9A227', d:'NCDOT names a roadway beneath that nothing in the LRS answers to. Often a private drive or municipal street, which has no LRS route at all.'},
+  both:      {t:'Both ways',            c:'#CF3910', d:'A named roadway could not be found AND an unnamed one was. The features list does not describe what is on the ground.'},
+  nonamed:   {t:'Highway below, unnamed',c:'#CF3910',d:'ServiceUnder says a highway passes beneath, and Feature Crossed names nothing. Measurement is the only source there will ever be for these.'}
+};
+function triage(b){
+  const fs=featuresOf(b), below=fs.filter(f=>f.loc==='B');
+  const hwyUnder=['1','4','6'].includes(String(b.SERVICEUNDER||'').trim());
+  const named=below.filter(f=>f.named);
+  const extra=below.filter(f=>f.named===false&&!f.carriageway);
+  const unres=named.filter(f=>!f.resolved);
+  let s;
+  if(!named.length&&hwyUnder&&b._featDone&&!extra.length) s='nonamed';
+  else if(!named.length&&hwyUnder&&!b._featDone)          s='nonamed';
+  else if(!below.length)                                   s='none';
+  else if(!b._featDone&&b._namedDone&&!unres.length)        s='resolved';
+  else if(!b._featDone&&b._namedDone&&unres.length)         s='unresolved';
+  else if(!b._featDone)                                    s='pending';
+  else if(unres.length&&extra.length)                      s='both';
+  else if(extra.length)                                    s='short';
+  else if(unres.length)                                    s='unresolved';
+  else                                                     s='agreed';
+  b._triage=s;
+  return s;
+}
+
 function rollUpFeatures(b){
   const fs=featuresOf(b);
   fs.forEach(f=>validateFeature(b,f));
   checkFeatureStructure(b);
+  triage(b);
   b._featSev=RANKSEV[Math.max(...fs.map(f=>SEVRANK[f.sev||'ok']))];
   b._nfeat=fs.length;
   b._nunder=fs.filter(f=>f.loc==='B').length;
@@ -3076,6 +3156,112 @@ async function expandOne(b,tally){
     }
   }
   return t;
+}
+
+/* ---- resolve the named features, for a whole county at once -----------------
+   The per-structure sweep asks the road network one question per structure:
+   1,282 requests for Mecklenburg, about twelve minutes. Most of that work is
+   redundant, because the roadways NCDOT names beneath its bridges are a small
+   set. Across Mecklenburg's 834 named features there are 40 distinct route
+   numbers.
+
+   So this pulls those 40 routes once — four pages, a few seconds — and resolves
+   every named feature in the scope against them, with no per-structure request
+   at all. The deck footprint orients itself on RD_ANGLE, so the route each
+   bridge carries does not have to be pulled either.
+
+   It answers only the named ones. Finding roadways NCDOT did NOT name still
+   needs the sweep, and triage says which structures that is worth doing for. */
+function routeNumbersNeeded(scope){
+  const nums=new Set(), sap=new Set();
+  scope.forEach(b=>{
+    const c=COUNTIES[b.COUNTY]; if(c) sap.add(c);
+    featuresOf(b).filter(f=>f.loc==='B'&&f.named&&!f.resolved).forEach(f=>{
+      carriedTokens(f.name).forEach(t=>{
+        const m=/(\d+)/.exec(t); if(m) nums.add(String(m[1]).padStart(5,'0'));
+      });
+    });
+  });
+  return {nums:[...nums], sap:[...sap]};
+}
+
+async function resolveNamed(scope){
+  const targets=(scope||ALL).filter(b=>b.LAT_DD&&b.LONG_DD&&
+    featuresOf(b).some(f=>f.loc==='B'&&f.named&&!f.resolved));
+  if(!targets.length){ toast('Every roadway NCDOT names in this scope already has a route and a milepoint.',5000); return; }
+  const {nums,sap}=routeNumbersNeeded(targets);
+  if(!nums.length||!sap.length){ toast('Nothing named here resolves to a route number.',4500); return; }
+
+  busy(true,'Resolving named features',nums.length+' routes across '+sap.length+' count'+(sap.length===1?'y':'ies'),4);
+  const paths=new Map(), meta=new Map();
+  try{
+    /* one LIKE per route number per county: class, qualifier and inventory are
+       the wildcard, because which carriageway NCDOT meant is exactly what we
+       are resolving */
+    const pats=[];
+    sap.forEach(c=>nums.forEach(n=>pats.push("RouteID LIKE '___"+n+c+"'")));
+    for(let i=0;i<pats.length;i+=60){
+      const where=pats.slice(i,i+60).join(' OR ');
+      let offset=0;
+      for(;;){
+        const j=await esriQuery(ROADCHAR,{where,outFields:'RouteID,RouteName,StreetName,Direction',
+          returnGeometry:'true',returnM:'true',outSR:'2264',orderByFields:'OBJECTID',
+          resultOffset:offset,resultRecordCount:2000},true);
+        const fs=j.features||[];
+        fs.forEach(f=>{
+          const a=f.attributes, r=a.RouteID;
+          if(!r||!/^\d{11}$/.test(r)) return;
+          if(!paths.has(r)){ paths.set(r,[]); meta.set(r,{name:a.RouteName,street:a.StreetName,dir:a.Direction}); }
+          ((f.geometry&&f.geometry.paths)||[]).forEach(p=>paths.get(r).push(p));
+        });
+        busy(true,'Resolving named features',paths.size.toLocaleString()+' routes loaded',
+             Math.min(70,4+(i/pats.length)*66));
+        if(fs.length<2000) break;
+        offset+=fs.length;
+        if(offset>60000) break;
+      }
+    }
+  }catch(e){ busy(false); toast('Could not load the named routes: '+e.message,8000); return; }
+
+  let done=0, still=0;
+  targets.forEach((b,i)=>{
+    const ctx=deckContext(b,null);
+    featuresOf(b).filter(f=>f.loc==='B'&&f.named&&!f.resolved).forEach(f=>{
+      const toks=carriedTokens(f.name);
+      let best=null;
+      paths.forEach((pl,rid)=>{
+        const d=decodeRID(rid);
+        if(!d||!toks.includes(d.label)) return;
+        const cl=classifyCandidate(b,rid,pl,ctx);
+        if(cl.verdict==='reject'||cl.verdict==='carried') return;
+        const m=mAtPoint(pl,ctx.cx,ctx.cy);
+        if(!m||m.m==null) return;
+        /* several carriageways can answer to one name; the one whose crossing
+           angle best matches the recorded skew is the one under this deck */
+        const score=(cl.expected==null?90:Math.abs(cl.angle-cl.expected));
+        if(best===null||score<best.score) best={score,rid,m,cl};
+      });
+      if(best){
+        f.rid=best.rid; f.mp=Math.round(best.m.m*1000)/1000; f.off=best.m.d;
+        f.resolved=true; f.confidence=best.cl.confidence;
+        f.angle=best.cl.angle; f.expected=best.cl.expected; f.why=best.cl.why;
+        f.origin='NCDOT names it; route measured against the road network';
+        f.routes=routesFor(f.name,best.rid);
+        done++;
+      } else still++;
+    });
+    b._namedDone=true;
+    rollUpFeatures(b);
+    if(i%50===0) busy(true,'Resolving named features',(i+1)+' / '+targets.length+' structures',
+                      70+((i+1)/targets.length)*30);
+  });
+  revalidate(); applyFilters(); if(SEL) drawDetail(ALL.find(x=>x.BRDG_NBR===SEL));
+  busy(false);
+  toast('Resolved '+done.toLocaleString()+' of '+(done+still).toLocaleString()+
+    ' roadways NCDOT names beneath these structures, from '+paths.size.toLocaleString()+
+    ' routes in '+nums.length+' number'+(nums.length===1?'':'s')+'.'+
+    (still?' '+still.toLocaleString()+' could not be matched to an LRS route — often a private drive or a municipal street, which has none.':'')+
+    ' Use the Features filter to see what still needs a look.',14000);
 }
 
 /* The whole scope, for an export or a submittal review. */
@@ -3310,6 +3496,12 @@ function applyFilters(){
       if(fr==='__cleared'&&!(r&&Object.keys(r.cleared||{}).length)) return false;
       if(!['__none','__any','__note','__cleared'].includes(fr)&&(!r||r.status!==fr)) return false;
     }
+    const ft=$('f-triage')?$('f-triage').value:'';
+    if(ft){
+      const t=b._triage||'none';
+      if(ft==='todo'){ if(!['short','unresolved','both','nonamed'].includes(t)) return false; }
+      else if(t!==ft) return false;
+    }
     if(fc&&b.COUNTY!==fc) return false;
     if(fd&&String(b.DIVISION)!==fd) return false;
     if(fk&&(b._rid||'')[0]!==fk) return false;
@@ -3505,9 +3697,13 @@ function findBlock(b,f,showCode){
 function featurePanel(b){
   const fs=featuresOf(b);
   const twins=(b._twins||[]);
+  const tr=TRIAGE[b._triage||'none']||TRIAGE.none;
   let h='<div class="dr-sec">Features'+
     '<span style="float:right;font-weight:400;letter-spacing:0;text-transform:none;color:#5A5A5A">'+
-    fs.filter(f=>f.loc==='C').length+' carried &middot; '+fs.filter(f=>f.loc==='B').length+' below</span></div>';
+    fs.filter(f=>f.loc==='C').length+' carried &middot; '+fs.filter(f=>f.loc==='B').length+' below</span></div>'+
+    '<div style="margin:0 0 8px 0;font-size:12px"><span style="display:inline-block;padding:2px 8px;'+
+    'border-radius:10px;background:'+tr.c+'22;color:'+tr.c+';font-weight:600">'+esc(tr.t)+'</span> '+
+    '<span style="color:#5A5A5A">'+esc(tr.d)+'</span></div>';
 
   if(twins.length){
     h+='<div class="find" style="border-left-color:#1E56B3;background:#EAF0FA"><b>One of a sister pair</b>'+
@@ -3585,6 +3781,13 @@ function featurePanel(b){
               esc(rv.fix06||'')+'" style="flex:1.4">'+
             '<input type="text" class="fx07" data-des="'+esc(f.des)+'" placeholder="Corrected BH07" value="'+
               esc(rv.fix07||'')+'" style="flex:1"></div>')+
+      /* The manual way in, for the ones nothing automatic can settle: point at
+         the road on the map and let NCDOT's own tool answer. */
+      (f.loc==='B'&&(!f.rid||!/^\d{11}$/.test(f.rid))
+        ? '<div style="font-size:11.5px;margin-top:5px"><a href="#" class="pinf" data-des="'+esc(f.des)+
+          '">Pick this roadway on the map</a> &mdash; arms the pin, then click the road '+
+          (f.name?'(<b>'+esc(f.name)+'</b>) ':'')+'where it passes under the bridge.</div>'
+        : '')+
     '</div>';
   });
   return h;
@@ -3772,6 +3975,13 @@ function drawDetail(b){
   /* Corrections on the other features. Same rule as the primary one: the value
      is re-tested the moment it changes, so a correction that is itself wrong
      fails in front of the person who typed it. */
+  $('dr-body').querySelectorAll('a.pinf').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    PINTARGET={bn, des:a.dataset.des};
+    if(!pinMode) $('pin').click();
+    toast('Pin armed for feature '+a.dataset.des+'. Click the roadway where it passes under bridge '+bn+
+          '. The route and milepoint at that point become that feature\u2019s values.',9000);
+  });
   $('dr-body').querySelectorAll('input.fx06,input.fx07').forEach(el=>{
     el.onchange=()=>{
       const bb=ALL.find(x=>x.BRDG_NBR===bn)||b;
@@ -3851,6 +4061,24 @@ async function pinAt(lat,lon){
        other. It is a measurement; it now says so, and where the point lands on
        an open structure it says which of that structure's features it matched. */
     const sel=SEL?ALL.find(x=>x.BRDG_NBR===SEL):null;
+
+    /* If the reviewer armed the pin from a feature, this measurement belongs to
+       that feature. Written as a DERIVED value with its provenance attached, so
+       an export can say where the number came from and who pointed at it. */
+    if(PINTARGET&&sel&&PINTARGET.bn===sel.BRDG_NBR&&at.RID&&at.MEAS!=null){
+      const f=featuresOf(sel).find(x=>x.des===PINTARGET.des);
+      if(f){
+        f.rid=at.RID; f.mp=Math.round(Number(at.MEAS)*1000)/1000; f.resolved=true;
+        f.off=null; f.confidence='medium';
+        f.origin='pin drop by '+(reviewerName()||'a reviewer')+' on '+new Date().toLocaleDateString();
+        f.why='Measured by NCDOT\u2019s own route/milepost tool at a point a reviewer chose on the map.';
+        f.routes=routesFor(f.name||at.RouteName||'',at.RID);
+        rollUpFeatures(sel); revalidate(); applyFilters(); drawDetail(sel);
+        toast('Feature '+f.des+' on bridge '+sel.BRDG_NBR+' set to '+at.RID+' at '+
+              Number(at.MEAS).toFixed(3)+'. Check it against the road you meant before exporting.',10000);
+      }
+      PINTARGET=null;
+    }
     const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
     L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
       '<div class="pop-t">The road at this point</div>'+
@@ -4164,18 +4392,19 @@ $('hidecleared').onchange=applyFilters;
 window.addEventListener('beforeunload',e=>{ if(REVDIRTY){ e.preventDefault(); e.returnValue=''; } });
 $('snbibtn').onclick=()=>loadSNBI();
 $('expandfeat').onclick=()=>deriveFeatures(VIEW.length&&VIEW.length<ALL.length?VIEW:ALL);
+$('resolvenamed').onclick=()=>resolveNamed(VIEW.length&&VIEW.length<ALL.length?VIEW:ALL);
 $('cacherefresh').onclick=refreshCache;
 $('silentbtn').onclick=()=>{
   silentOnly=!silentOnly; $('silentbtn').classList.toggle('on',silentOnly);
   $('silentbtn').textContent=silentOnly?'Showing only clean-but-wrong — click to undo'
                                        :'Show what submits clean but is wrong';
   applyFilters();};
-$('clearf').onclick=()=>{['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax']
+$('clearf').onclick=()=>{['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax','f-triage']
   .concat(['f-stype','f-cond']).forEach(i=>$(i).value=''); activeChecks.clear();
   silentOnly=false; $('silentbtn').classList.remove('on');
   $('silentbtn').textContent='Show what submits clean but is wrong'; applyFilters();};
 ['f-q','f-mpmin','f-mpmax'].forEach(i=>$(i).oninput=()=>{clearTimeout(window._d);window._d=setTimeout(applyFilters,280);});
-['f-county','f-div','f-class','f-inv','f-maint','f-stype','f-cond'].forEach(i=>$(i).onchange=applyFilters);
+['f-county','f-div','f-class','f-inv','f-maint','f-stype','f-cond','f-triage'].forEach(i=>$(i).onchange=applyFilters);
 $('dr-x').onclick=()=>{$('drawer').classList.remove('open');SEL=null;routeLayer.clearLayers();renderTable();};
 $('l-county').onchange=e=>{if(countyLayer) e.target.checked?countyLayer.addTo(map):map.removeLayer(countyLayer);};
 $('l-label').onchange=e=>{e.target.checked?labelLayer.addTo(map):map.removeLayer(labelLayer);};
