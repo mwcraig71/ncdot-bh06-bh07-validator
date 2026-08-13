@@ -97,7 +97,20 @@ guide/    user guide, deployment notes, and the original findings brief
 data/     the 213,475 NC HPMS route IDs, and review queues
 tools/    a Python CLI for the same checks, for bulk/offline work
 tests/    request-counting cache suite and basemap-fallback suite (Playwright, all endpoints mocked)
+supabase/ database schema as migrations, plus the round-trip verification script
 ```
+
+## The database
+
+The browser tool holds review work in a file each reviewer keeps. That is the right answer for
+one person and the wrong one for a team feeding a March submittal, so the same model now exists
+as a Postgres schema on Supabase — see [`supabase/README.md`](supabase/README.md).
+
+The design decision worth knowing from outside: **value sources are rows, not columns.**
+`feature_values` is keyed on `(feature, field, source)` where source is PUBLISHED, DERIVED or
+REVIEWED, so a derivation pass writes only its own row and structurally cannot overwrite a
+reviewer's correction. Precedence is the enum's declaration order and is resolved once, in a
+view, rather than re-implemented wherever a value is read.
 
 ## The background map has six sources, and needs only one
 
