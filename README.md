@@ -42,6 +42,21 @@ still wrong:
 - Duplicate route+milepoint pairs, routes that don't exist, county-code mismatches,
   non-inventory directions, and more.
 
+## Reference data is read once
+
+Bridges are re-queried every run, because that is the thing you are asking about.
+Everything behind them is not. County boundaries, the SNBI structure inventory,
+FHWA's HPMS submittal and route geometry are each pulled once for the scope that
+needed them and reused for the rest of the session — a county pull answers every
+single-bridge lookup inside that county, and a statewide pull answers everything.
+
+Queries are scoped to what is being asked, too. A single-bridge lookup asks for
+one structure number in one layer: **one request**, where it used to trigger a
+full statewide pull of all eight structure layers before showing a single result.
+
+**Settings → Data cache** shows what is in memory and offers one button to drop
+it all and re-read, for when NCDOT republishes while the page is open.
+
 ## Some things it established along the way
 
 - **NCDOT's mileposts are correct.** Measured against the road network they track along-the-road
@@ -65,6 +80,7 @@ src/      tool_template.html + build.py — everything is generated from these
 guide/    user guide, deployment notes, and the original findings brief
 data/     the 213,475 NC HPMS route IDs, and review queues
 tools/    a Python CLI for the same checks, for bulk/offline work
+tests/    request-counting cache suite (Playwright, all endpoints mocked)
 ```
 
 ## Building

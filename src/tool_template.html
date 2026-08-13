@@ -530,6 +530,16 @@ td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
         </div>
       </div>
 
+      <div class="setsec"><h4>Data cache</h4>
+        <p class="hint" id="cachestate">Nothing loaded yet.</p>
+        <div class="setbtns">
+          <button class="btn ghost" id="cacherefresh">Refresh cached data</button>
+        </div>
+        <p class="hint">Reference data is read once per scope and reused for the rest of the session &mdash;
+        a county pull answers every single-bridge lookup inside it, and a statewide pull answers everything.
+        Refresh only if NCDOT has republished while this page has been open.</p>
+      </div>
+
       <div class="setsec"><h4>Tools</h4>
         <div class="setbtns">
           <button class="btn ghost" id="ncdotcsv" disabled>NCDOT table</button>
@@ -672,6 +682,21 @@ let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN=
 let REVIEW=new Map(), REVDIRTY=false, REVIEWER='';
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
+
+/* ---------- reference-data cache -------------------------------------------
+   None of the reference data changes while the page is open. NCDOT republishes
+   quarterly; county boundaries and structure inventory are static within a
+   session. So every reference pull records what scope it covered, and is
+   skipped when the scope already asked for is covered by something in memory.
+   HPMSGOT below is the original of this pattern; SNBICOV, CNTYLOADED and
+   ROUTEGEO follow it. Refresh cache in Settings drops the lot and re-pulls. */
+const SNBICOV={state:false, counties:new Set(), known:new Set()};
+/* .state   — a statewide pull happened; covers everything
+   .counties— counties pulled across every structure layer; covers any structure in them
+   .known   — individual structure numbers whose answer is settled, found or not */
+let CNTYLOADED=false, CNTYPROMISE=null;
+const ROUTEGEO=new Map();            /* RouteID -> GeoJSON, for the red route overlay */
+let ROUTEGEOTOKEN=0;                 /* guards against out-of-order draws on fast clicking */
 
 /* ---------- helpers ---------- */
 const $=id=>document.getElementById(id);
@@ -878,7 +903,17 @@ legend.onAdd=function(){const d=L.DomUtil.create('div','maplegend');
   return d;};
 legend.addTo(map);
 
-async function loadCounties(){
+/* County boundaries, names and the SAP/FIPS crosswalk. Static for the session.
+   Guarded against re-entry: concurrent callers share one in-flight request and
+   later callers return immediately. Pass force=true to genuinely re-pull. */
+async function loadCounties(force){
+  if(!force){
+    if(CNTYLOADED) return;
+    if(CNTYPROMISE) return CNTYPROMISE;
+  }
+  CNTYPROMISE=(async()=>{
+  if(countyLayer){ try{ map.removeLayer(countyLayer); }catch(e){} countyLayer=null; }
+  labelLayer.clearLayers();
   try{
     const r=await fetch(COUNTYBDY+'/query?'+new URLSearchParams({
       where:'1=1',outFields:'CountyName,SapCountyId,FIPS,DOTDivisionID',returnGeometry:'true',
@@ -891,7 +926,8 @@ async function loadCounties(){
     });
     countyLayer=L.geoJSON(gj,{style: tilesDead
       ? {color:'#8C8C86',weight:1,fill:true,fillColor:'#F7F7F3',fillOpacity:1,opacity:.9}
-      : {color:'#1A1A1A',weight:1,fill:false,opacity:.55,interactive:false}}).addTo(map);
+      : {color:'#1A1A1A',weight:1,fill:false,opacity:.55,interactive:false}});
+    if(!$('l-county')||$('l-county').checked) countyLayer.addTo(map);
     gj.features.forEach(f=>{
       const c=L.geoJSON(f).getBounds().getCenter();
       labelLayer.addLayer(L.marker(c,{interactive:false,icon:L.divIcon({className:'',
@@ -900,9 +936,14 @@ async function loadCounties(){
         'white-space:nowrap;transform:translate(-50%,-50%)">'+esc(f.properties.CountyName)+'</div>'})}));
     });
     const sel=$('f-county');
+    while(sel.options.length>1) sel.remove(1);          /* idempotent on a forced re-pull */
     Object.keys(COUNTIES).sort().forEach(n=>sel.add(new Option(n,n)));
     buildArg();
+    CNTYLOADED=true;
   }catch(e){ toast('Could not load county boundaries: '+e.message,6000); }
+  finally{ CNTYPROMISE=null; }
+  })();
+  return CNTYPROMISE;
 }
 
 function drawPoints(){
@@ -925,15 +966,24 @@ function drawPoints(){
   }
 }
 
+/* Route geometry is cached per RouteID. Selecting three bridges on the same
+   route used to issue three identical requests; now the second and third are
+   free. The token guards against a slow first request landing after a fast
+   second one and painting the wrong route. */
 async function drawRoute(rid){
   routeLayer.clearLayers();
   if(!rid||!$('l-route').checked) return;
+  const paint=gj=>routeLayer.addLayer(
+    L.geoJSON(gj,{style:{color:'#CF3910',weight:4,opacity:.75,interactive:false}}));
+  if(ROUTEGEO.has(rid)){ ROUTEGEOTOKEN++; paint(ROUTEGEO.get(rid)); return; }
+  const tok=++ROUTEGEOTOKEN;
   try{
     const r=await fetch(ROADCHAR+'/query?'+new URLSearchParams({
       where:"RouteID='"+rid+"'",outFields:'RouteID',returnGeometry:'true',outSR:'4326',
       maxAllowableOffset:'0.0001',f:'geojson'}));
     const gj=await r.json();
-    routeLayer.addLayer(L.geoJSON(gj,{style:{color:'#CF3910',weight:4,opacity:.75,interactive:false}}));
+    ROUTEGEO.set(rid,gj);
+    if(tok===ROUTEGEOTOKEN) paint(gj);
   }catch(e){}
 }
 
@@ -1030,6 +1080,8 @@ async function run(){
     $('locate').disabled=ALL.length===0;
     $('resolve').disabled=ALL.length===0;
     $('snbibtn').disabled=ALL.length===0;
+    /* a county already in memory answers this new scope with no request at all */
+    $('snbibtn').classList.toggle('on',ALL.some(b=>b._snbi));
     $('fillnull').disabled=ALL.length===0;
     $('csv').disabled=ALL.length===0;
     if(!ALL.length) toast('Nothing matched that query.',4000);
@@ -1167,36 +1219,138 @@ const SNBI_FIELDS=['StructureNumber','DeckCondition','SuperStructureCondition','
  'StructureTypeMain','StructureTypeMainMaterial','StructureTypeMainCon','SuperStructureType','SubStructureType',
  'ServiceOn','ServiceUnder','ServiceType','NHS','FunctionalClass','Owner','OwnerName','MaintResponsible',
  'DetourLength','ADT','AdtYear','InventoryRoute','ReplacementCost','TIP','City'];
-let SNBI=new Map();
+let SNBI=new Map();                  /* StructureNumber -> attributes, accumulated across pulls */
+
+/* The bridge layer carries BRDG_TYP_NM, which lines up closely — not perfectly —
+   with the eight structure layers. Close enough to ask the LIKELY layer first;
+   the early exit below is what makes the result correct, so a wrong guess costs
+   ordering and nothing else. */
+const TYP2LAYER={'BRIDGE':0,'FEDERAL BRIDGE':0,'VEHICULAR UNDERPASS':0,'PAVEMENT ON PILES':0,
+  'FERRY RAMP':0,'PRIVATE STRUCTURE':0,'PIPE':1,'CULVERT':2,'RAILROAD':3,'TUNNEL':4,
+  'PEDESTRIAN WALKWAY':5,'PEDESTRIAN UNDERPASS':5,'OVERHEAD SIGN':6,'CANTILEVER SIGN':6,
+  'T-POLE SIGN':6};
+const SNBI_IDCAP=300;      /* at or below this many structures, filter by StructureNumber */
+const SNBI_CNTYCAP=40;     /* above this many counties, one statewide pull is cheaper */
+
+const titleCase=s=>String(s==null?'':s).replace(/\b(\w)(\w*)\b/g,(m,a,b)=>a.toUpperCase()+b.toLowerCase());
+const sqlList=a=>a.map(v=>"'"+String(v).replace(/'/g,"''")+"'").join(',');
+
+/* What does the loaded scope actually need from the structures service?
+   The join is on StructureNumber, and the only structure numbers we will ever
+   look up are the ones already on screen — so the scope is ALL's own counties,
+   not neededFips()'s wider set. neededFips() deliberately reaches into
+   neighbouring counties because a BH06 may name one; nothing in SNBI does. */
+function snbiScope(){
+  const counties=new Set(), nums=new Set(), cnty=new Map(), typ=new Map();
+  ALL.forEach(b=>{
+    const bn=String(b.BRDG_NBR==null?'':b.BRDG_NBR).trim(); if(!bn) return;
+    nums.add(bn);
+    const c=String(b.COUNTY||'').trim().toUpperCase();
+    if(c){ counties.add(c); cnty.set(bn,c); }
+    typ.set(bn,String(b.BRDG_TYP_NM||'').trim().toUpperCase());
+  });
+  return {counties:[...counties],nums:[...nums],cnty,typ};
+}
+/* Is this one structure's answer already in memory? Either it was asked for by
+   name, or its whole county was pulled across every layer. */
+function snbiHas(s,bn){ return SNBICOV.known.has(bn)||SNBICOV.counties.has(s.cnty.get(bn)); }
+/* Coverage is decided per structure, not per scope name — so a scope is covered
+   the moment every structure in it is, however that came about. The mode
+   dropdown is never consulted: what matters is what is on screen. */
+function snbiCovered(s){
+  if(SNBICOV.state) return true;
+  return s.nums.length>0 && s.nums.every(bn=>snbiHas(s,bn));
+}
+/* Layers ordered by how many of the wanted structures probably live in each. */
+function snbiLayerOrder(s,want){
+  const score=new Array(STRUCT_LAYERS.length).fill(0);
+  want.forEach(bn=>{ const li=TYP2LAYER[s.typ.get(bn)]; if(li!=null) score[li]++; });
+  return STRUCT_LAYERS.map((L,i)=>({L,i,n:score[i]}))
+    .sort((a,b)=>b.n-a.n||a.i-b.i).map(x=>x.L);
+}
+
+/* This service caps a page at 1,000 records — not the 2,000 the bridge, road
+   and HPMS services allow. Asking for 2,000 and stopping when fewer come back
+   silently truncated every layer at its first page: a statewide pull returned
+   4,367 of 22,899 structures. Page at the service's own limit, advance by what
+   actually arrived, and honour exceededTransferLimit. */
+const SNBI_PAGE=1000;
+
+/* One pull. Pages each layer, stops the moment every wanted structure is found. */
+async function snbiPull(where,layers,want,label){
+  const post=where.length>1200;
+  const rem=want?new Set(want):null;
+  let n=0, ran=0;
+  for(let li=0;li<layers.length;li++){
+    const [id,lname]=layers[li];
+    let off=0;
+    for(;;){
+      const j=await esriQuery(STRUCT+'/'+id,{where,outFields:SNBI_FIELDS.join(','),
+        returnGeometry:'false',orderByFields:'ObjectID',resultOffset:off,resultRecordCount:SNBI_PAGE},post);
+      const fs=j.features||[];
+      fs.forEach(f=>{const a=f.attributes;
+        if(a.StructureNumber){ const k=String(a.StructureNumber).trim();
+          a._type=lname; SNBI.set(k,a); if(rem) rem.delete(k); n++; }});
+      if(!fs.length) break;
+      if(fs.length<SNBI_PAGE&&!j.exceededTransferLimit) break;
+      off+=fs.length;
+    }
+    ran++;
+    busy(true,'SNBI inventory data',label+' — '+lname+', '+n.toLocaleString()+' structures',
+      ran/layers.length*100);
+    if(rem&&!rem.size) break;                    /* everything we came for */
+  }
+  return {ranAll:ran===layers.length};
+}
 
 async function loadSNBI(){
-  const mode=$('mode').value;
-  let where='1=1';
-  if(mode==='county') where="County='"+$('arg').value.replace(/'/g,"''").replace(/\b(\w)(\w*)\b/g,
-      (m,a,b)=>a.toUpperCase()+b.toLowerCase())+"'";
+  if(!ALL.length){ toast('Run a query first — SNBI data is joined to the structures on screen.',4500); return; }
+  const s=snbiScope();
+  if(snbiCovered(s)){ snbiJoin(true); return; }
+
+  const want=new Set(s.nums.filter(bn=>!snbiHas(s,bn)));
+  const missCnty=[...new Set([...want].map(bn=>s.cnty.get(bn)).filter(Boolean))];
   busy(true,'SNBI inventory data','reading NCDOT structures service',1);
-  const map=new Map(); let n=0;
   try{
-    for(let li=0;li<STRUCT_LAYERS.length;li++){
-      const [id,label]=STRUCT_LAYERS[li];
-      let off=0;
-      for(;;){
-        const j=await esriQuery(STRUCT+'/'+id,{where,outFields:SNBI_FIELDS.join(','),
-          returnGeometry:'false',orderByFields:'ObjectID',resultOffset:off,resultRecordCount:2000});
-        const fs=j.features||[];
-        fs.forEach(f=>{const a=f.attributes;
-          if(a.StructureNumber){ a._type=label; map.set(String(a.StructureNumber).trim(),a); n++; }});
-        if(fs.length<2000) break;
-        off+=2000;
+    if(missCnty.length>SNBI_CNTYCAP){        /* broader than a long IN list is worth */
+      await snbiPull('1=1',STRUCT_LAYERS,null,'statewide');
+      SNBICOV.state=true;
+    }else if(want.size<=SNBI_IDCAP){
+      const ids=[...want];
+      const layers=snbiLayerOrder(s,ids);
+      for(let i=0;i<ids.length;i+=200){
+        const chunk=ids.slice(i,i+200).filter(x=>!SNBI.has(x));
+        if(!chunk.length) continue;
+        await snbiPull('StructureNumber IN ('+sqlList(chunk)+')',layers,new Set(chunk),
+          chunk.length.toLocaleString()+' structure'+(chunk.length===1?'':'s'));
       }
-      busy(true,'SNBI inventory data',label+' — '+n.toLocaleString()+' structures',(li+1)/STRUCT_LAYERS.length*100);
+      ids.forEach(bn=>SNBICOV.known.add(bn));
+    }else{
+      const layers=snbiLayerOrder(s,[...want]);
+      const r=await snbiPull('County IN ('+sqlList(missCnty.map(titleCase))+')',layers,want,
+        missCnty.length===1?titleCase(missCnty[0]):missCnty.length+' counties');
+      if(r.ranAll) missCnty.forEach(c=>SNBICOV.counties.add(c));
+      want.forEach(bn=>SNBICOV.known.add(bn));
+      /* No chase-by-name pass for whatever is still unmatched. Checked against
+         the live services: of 23,022 bridges, 22,835 have a structures record
+         and every single one carries the same county in both. The 187 misses
+         have no record at all, so a county-scoped query loses nothing that a
+         statewide one would have found. */
     }
   }catch(e){ busy(false); toast('Could not read the structures service: '+e.message,7000); return; }
-  SNBI=map;
+  snbiJoin(false);
+}
+
+function snbiJoin(cached){
   ALL.forEach(b=>{ b._snbi=SNBI.get(String(b.BRDG_NBR).trim())||null; });
   const matched=ALL.filter(b=>b._snbi).length;
   populateFilters(); applyFilters(); busy(false);
   $('snbibtn').classList.add('on');
+  if(cached){
+    toast('SNBI inventory was already in memory for this scope — joined to '+matched.toLocaleString()+
+      ' of '+ALL.length.toLocaleString()+' structures. Nothing refetched.',7000);
+    return;
+  }
   const types={}; ALL.forEach(b=>{const t=b._snbi?b._snbi._type:'Unclassified'; types[t]=(types[t]||0)+1;});
   toast('SNBI inventory data joined to '+matched.toLocaleString()+' of '+ALL.length.toLocaleString()+' structures. '+
     Object.entries(types).sort((a,b)=>b[1]-a[1]).map(([k,v])=>v.toLocaleString()+' '+k).join(', ')+
@@ -2223,6 +2377,53 @@ function loadHPMS(text){
 }
 
 /* ==========================================================================
+   CACHE STATE
+   What is in memory, and one way to throw it away. A reviewer who knows NCDOT
+   republished mid-session should not have to reload the page to get clean data.
+   ========================================================================== */
+function updateCacheState(){
+  const el=$('cachestate'); if(!el) return;
+  const cs=[...SNBICOV.counties].sort().map(titleCase);
+  const snbi = SNBICOV.state ? 'statewide, '+SNBI.size.toLocaleString()+' structures'
+    : !SNBI.size ? 'not loaded'
+    : SNBI.size.toLocaleString()+' structures'+
+      (cs.length ? ' — '+(cs.length>6?cs.length+' counties':cs.join(', '))
+       : ' — '+SNBICOV.known.size.toLocaleString()+' looked up by number');
+  const rl=Object.keys(ROUTELEN).length;
+  const rows=[
+    ['County boundaries', CNTYLOADED?Object.keys(COUNTIES).length+' counties':'not loaded'],
+    ['SNBI inventory', snbi],
+    ['HPMS '+HPMSYEAR, HPMS.size?HPMS.size.toLocaleString()+' routes across '+HPMSGOT.size+
+      ' count'+(HPMSGOT.size===1?'y':'ies'):'not loaded'],
+    ['Route geometry', ROUTEGEO.size?ROUTEGEO.size.toLocaleString()+' cached':'none cached'],
+    ['Route extents', rl?rl.toLocaleString()+' measured':'none measured']
+  ];
+  el.innerHTML=rows.map(r=>'<b>'+esc(r[0])+':</b> '+esc(r[1])).join('<br>');
+}
+
+async function refreshCache(){
+  if(!confirm('Drop everything held in memory — county boundaries, SNBI inventory, HPMS, route '+
+    'geometry and route extents — and read it again from NCDOT and FHWA?\n\n'+
+    'Review notes, statuses and cleared findings are not touched.')) return;
+  SNBI=new Map(); SNBICOV.state=false; SNBICOV.counties.clear(); SNBICOV.known.clear();
+  HPMS=new Map(); HPMSGOT=new Set();
+  ROUTEGEO.clear(); ROUTELEN={}; ROUTEASKED=new Set(); DEEP=false; LOCATED=false;
+  ALL.forEach(b=>{ b._snbi=null; b._off=null; });
+  routeLayer.clearLayers();
+  $('snbibtn').classList.remove('on');
+  $('hpmsfhwa').classList.remove('on'); $('hpmsbtn').classList.remove('on');
+  $('hpmsn').textContent='';
+  CNTYLOADED=false;
+  busy(true,'Refreshing','county boundaries',10);
+  await loadCounties(true);
+  busy(false);
+  if(ALL.length){ revalidate(); populateFilters(); applyFilters(); }
+  updateCacheState();
+  toast('Cache cleared and county boundaries re-read. Run all checks to pull fresh bridge, SNBI '+
+    'and HPMS data for your scope.',9000);
+}
+
+/* ==========================================================================
    WIRING
    ========================================================================== */
 $('mode').onchange=buildArg;
@@ -2242,6 +2443,7 @@ function syncSettings(){
     ? c.bridges.toLocaleString()+' structures reviewed, '+c.cleared.toLocaleString()+' findings cleared.'+
       (REVDIRTY?' Unsaved changes — save before you close.':' Saved.')
     : 'Notes, statuses and cleared findings live in a file you keep. Merge combines two reviewers.';
+  updateCacheState();
   if($('pwbtn')) $('pwbtn').style.display=isAdmin()?'':'none';
 }
 document.querySelectorAll('.mtabs button').forEach(t=>t.onclick=()=>{
@@ -2265,7 +2467,8 @@ $('revfile').onchange=e=>{const f=e.target.files[0]; if(!f) return;
 $('f-rev').onchange=applyFilters;
 $('hidecleared').onchange=applyFilters;
 window.addEventListener('beforeunload',e=>{ if(REVDIRTY){ e.preventDefault(); e.returnValue=''; } });
-$('snbibtn').onclick=loadSNBI;
+$('snbibtn').onclick=()=>loadSNBI();
+$('cacherefresh').onclick=refreshCache;
 $('silentbtn').onclick=()=>{
   silentOnly=!silentOnly; $('silentbtn').classList.toggle('on',silentOnly);
   $('silentbtn').textContent=silentOnly?'Showing only clean-but-wrong — click to undo'

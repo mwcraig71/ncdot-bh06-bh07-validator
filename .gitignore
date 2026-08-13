@@ -1,5 +1,5 @@
 node_modules/
-fx/
+/fx/
 *.zip
 __pycache__/
 .DS_Store
