@@ -1,7 +1,7 @@
 /* Basemap fallback: when a tile host is blocked, does the map find another one? */
 const {chromium}=require('playwright');const fs=require('fs');
-const counties=fs.readFileSync('tests/fx/counties.json','utf8');
-const FILE=process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html';
+const sbmock=require('./fx/sbmock.js');
+const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 const PNG=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8//9/PQAJewN9nQAyAQAAAABJRU5ErkJggg==','base64');
 
 const HOSTS=['server.arcgisonline.com','services.arcgisonline.com','basemap.nationalmap.gov',
@@ -27,8 +27,8 @@ const mk=async(b,blocked)=>{
       return blocked.includes('gis11')? r.abort('blockedbyclient')
         : r.fulfill({contentType:'image/png',body:PNG}); }
     if(u.includes('GPServer')) return r.fulfill({contentType:'application/json',body:'{"name":"IdentifyRouteMilepostUsingPointTool"}'});
-    if(u.includes('CountyBdy')) return r.fulfill({contentType:'application/json',body:counties});
     return r.fulfill({contentType:'application/json',body:'{"features":[]}'});});
+  await sbmock(p);
   return {p,seen};
 };
 
@@ -42,7 +42,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
   console.log('\n1. Picker is built from the provider table');
   {
     const {p}=await mk(b,[]);
-    await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(2200);
+    await p.goto('file://'+FILE); await p.waitForTimeout(2200);
     const g=await p.evaluate(()=>[...document.querySelectorAll('#f-base optgroup')].map(o=>o.label));
     console.log('  groups:'); g.forEach(x=>console.log('    '+x));
     ok('option count',await p.evaluate(()=>document.querySelectorAll('#f-base option').length),14);
@@ -54,7 +54,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
   const scenario=async(label,blocked,wantKey)=>{
     const {p,seen}=await mk(b,blocked);
     const errs=[]; p.on('pageerror',e=>errs.push(e.message));
-    await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(5000);
+    await p.goto('file://'+FILE); await p.waitForTimeout(5000);
     const key=await p.evaluate(()=>baseKey);
     const dead=await p.evaluate(()=>[...DEADHOST]);
     const tl=await p.evaluate(()=>tilesDead);
@@ -104,7 +104,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
   {
     const {p}=await mk(b,['server.arcgisonline.com','services.arcgisonline.com',
       'basemap.nationalmap.gov','basemaps.cartocdn.com','gis11']);
-    await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(5000);
+    await p.goto('file://'+FILE); await p.waitForTimeout(5000);
     ok('starts tileless',await p.evaluate(()=>tilesDead),true);
     await p.selectOption('#f-base','nc1_ortho'); await p.waitForTimeout(1200);
     ok('picked NC OneMap',await p.evaluate(()=>baseKey),'nc1_ortho');
@@ -118,7 +118,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
   console.log('\n8. Diagnostics probes every host');
   {
     const {p}=await mk(b,['server.arcgisonline.com','services.arcgisonline.com']);
-    await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(2500);
+    await p.goto('file://'+FILE); await p.waitForTimeout(2500);
     await p.click('#setbtn'); await p.waitForTimeout(300);
     await p.click('#diag'); await p.waitForTimeout(22000);
     const t=await p.evaluate(()=>document.getElementById('dr-body').innerText);

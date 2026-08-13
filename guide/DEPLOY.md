@@ -1,40 +1,40 @@
 # Publishing the validator to the web
 
-The `web/` folder is the whole thing. One HTML file, no build step, no server code, no
-database. Upload it and it works.
+`docs/` is the whole of the front end. One HTML file, no build step, no server code. Upload it
+and it works.
+
+There is a back end now — a Supabase project holding the reference data and the review record —
+but it is already deployed and the page talks to it directly. Publishing the page does not
+involve it.
 
 ---
 
-## The password system is gone from the web build — deliberately
+## All three builds are the same code
 
-The downloadable copy still has its two-password gate, because on a file someone emails around
-it does a real job: it stops a casual double-click and it keeps *clear findings* with the people
-who own that decision.
+There used to be a "public" build with the password gate stripped out. There is no gate in any
+build any more, so there is nothing to strip: `dist/`, the artifact copy and `docs/index.html`
+contain identical application code, and `docs/index.html` differs only by carrying public-page
+metadata (title, description, social preview, favicon).
 
-On a public URL that same gate is worse than nothing:
+That matters for deployment because it removes the class of bug where the published copy behaves
+differently from the one you tested.
 
-- Anyone can View Source, read the code, delete the gate, or just call the app's functions from
-  the browser console.
-- A SHA-256 of a short password sitting in publicly downloadable JavaScript is crackable offline
-  with a wordlist in seconds. **If anyone had reused a real password there, publishing it would
-  have leaked that password.**
-- The "download a configured copy" flow can't work on a hosted page — you'd have to re-upload
-  the file every time you changed a password.
+## What decides who may do what
 
-So the web build has no gate, no password code and no crypto in it at all. Everyone who opens it
-gets every action, including clearing findings.
+Not the page. Postgres.
 
-**That is safe here, and it's worth understanding why.** There is no shared state. Every figure
-the tool reads is already published by NCDOT and FHWA, and all review work — notes, statuses,
-cleared findings — lives in memory and in a JSON file the visitor saves to their own machine.
-One person clearing findings cannot affect anyone else's session, because there is nothing
-between them. There is genuinely nothing to protect.
+- Anyone who opens the URL can run every scope, every check, every filter, and export the CSV.
+  Every input is already published by NCDOT and FHWA.
+- Recording a decision — a status, a note, a corrected BH06/BH07, a cleared finding — needs a
+  signed-in account. Sign-in is a link emailed to the reviewer; there is no password anywhere in
+  the system.
+- No client, signed in or not, can write what NCDOT publishes, and none can delete anything.
 
-If that ever changes — a shared review database, several people working one county at once —
-that needs a real backend with real accounts, and the gate should be enforced there, never in
-the page.
-
----
+The anon key is printed in the page. That is what it is for: it identifies the project, and what
+it can actually do is decided by row level security, where anon has `SELECT` and nothing else.
+Treating it as a secret would be a misunderstanding of what it is — and the refusal is asserted
+from a real anon session over HTTPS in `supabase/tests/anon_api_test.sh`, not inferred from
+reading the policies.
 
 ## Where to put it
 
@@ -42,47 +42,48 @@ Anywhere that serves static files over HTTPS. In rough order of least effort:
 
 | Host | Notes |
 |---|---|
-| **Cloudflare Pages** | Free. Drag the `web/` folder onto the dashboard and it's live in about a minute. Custom domain and HTTPS included. Reads `_headers`. |
+| **GitHub Pages** | Free for a public repo. Point Pages at `docs/` and it is live. |
+| **Cloudflare Pages** | Free. Drag the folder onto the dashboard, live in about a minute. Custom domain and HTTPS included. Reads `_headers`. |
 | **Netlify** | Free, same drag-and-drop. Also reads `_headers`. |
-| **GitHub Pages** | Free for a public repo. Commit `web/` and enable Pages. |
-| **Your existing strinteg.com server** | Drop `index.html` at something like `/tools/bh06/`. Works on IIS, Apache, nginx or a WordPress host's static directory — it's just a file. |
-| **Azure Static Web Apps** | Free tier. Worth it only if you later want Microsoft 365 sign-in. |
+| **Your existing strinteg.com server** | Drop `index.html` at something like `/tools/bh06/`. IIS, Apache, nginx or a WordPress host's static directory — it is just a file. |
 
 A suggested URL: `tools.strinteg.com/bh06` or `strinteg.com/tools/bh06`.
 
 ## Requirements
 
-HTTPS, and nothing else. No Node, no PHP, no database, no environment variables.
+HTTPS, and nothing else. No Node, no PHP, no environment variables.
 
-The visitor's browser talks directly to three services:
+The visitor's browser talks to two hosts, plus tiles:
 
 | Host | For | If unreachable |
 |---|---|---|
-| `gis11.services.ncdot.gov` | bridges, road network, county boundaries | essential |
-| `geo.dot.gov` | the FHWA HPMS submittal (BH06-3) | every other check still runs |
-| six tile hosts (Esri, Esri mirror, USGS National Map, NC OneMap, CARTO, gis11) | background map tiles | cosmetic — **any one** is enough, and the tool falls through them on its own; if all are blocked it draws county outlines instead |
+| `gis11.services.ncdot.gov` | the bridges under test, and route geometry for the map | essential |
+| `drstmntdbmacdplhjvmx.supabase.co` | county boundaries, SNBI inventory, HPMS, route extents, and the review record | the checks that need reference data cannot run |
+| six tile hosts (Esri, Esri mirror, USGS National Map, NC OneMap, CARTO, gis11) | background map tiles | cosmetic — **any one** is enough, the tool falls through them on its own, and if all are blocked it draws county outlines instead |
 
-**All three were tested and confirmed to allow cross-origin requests from any HTTPS origin,
+`geo.dot.gov` used to be on this list. It is not any more: the HPMS submittal is loaded into the
+database by a scheduled job, so no reviewer's machine contacts FHWA.
+
+**All of these were tested and confirmed to allow cross-origin requests from any HTTPS origin,
 including the POST preflight the heavier checks need.** Nothing needs proxying.
 
 ## After you publish
 
-Open it and press **Diagnostics** in Settings. It probes each service from wherever it is now
-and reports what's reachable — a two-second check that the deployment is sound.
+Open it and press **Diagnostics** in Settings. It probes each service from wherever the page is
+now and reports what is reachable — a two-second check that the deployment is sound. It also
+reports how many reference-data sources have been loaded, which catches "the page is up but the
+project is not reachable from here".
 
 ---
 
-## What visitors get
-
-A tool that validates BH06 and BH07 for any NC bridge, route, county or the whole state against
-FHWA's published rules, NCDOT's live LRS and FHWA's own HPMS submittal — running entirely in
-their browser, with nothing uploaded anywhere.
-
-Since every input is public data and the output is a QC finding, this doubles as a public
-demonstration of the work. The page carries a description and social preview text for that
-reason.
-
 ## Keeping it current
 
-There's no data to refresh — it reads NCDOT live, so it follows their quarterly republishing on
-its own. Re-upload `index.html` only when the tool itself changes.
+Two different cadences, and it is worth keeping them apart:
+
+**The data** refreshes itself. Bridges are read live from NCDOT on every run. The reference data
+is reloaded quarterly by scheduled jobs in the database — the schedule is in migration `0019`.
+**Settings → Data** shows the vintage of each source, and a signed-in reviewer can ask for a
+reload between quarters with **Reload from NCDOT now**.
+
+**The page** only changes when the tool changes. Rebuild with `python3 src/build.py` and
+re-upload `docs/index.html`.

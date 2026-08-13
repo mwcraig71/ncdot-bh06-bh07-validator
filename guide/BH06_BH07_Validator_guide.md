@@ -1,48 +1,45 @@
 # NCDOT SNBI BH06 / BH07 Validator — user guide
 
-A single HTML file. Double-click it. Nothing to install, no login, no ArcGIS licence.
+A single HTML file. Double-click it. Nothing to install, no ArcGIS licence, and no login needed
+to read anything.
 
-Everything it shows is read live from NCDOT's own public ArcGIS REST services, so it stays
-current as NCDOT republishes each quarter.
+The bridges you are testing are read live from NCDOT's own public ArcGIS services, so they stay
+current as NCDOT republishes each quarter. Everything they are tested *against* — county
+boundaries, the SNBI inventory, FHWA's HPMS submittal, and every route's true extent — is
+loaded into a database on a schedule and read from there. Your machine no longer pulls it.
 
 ---
 
-## Passwords and roles
+## Signing in, and what it is for
 
-Two passwords, two roles.
+**Reading needs no account.** Anyone can open the tool, run any scope, run every check, filter,
+look at the map, and export the CSV. That is deliberate: every figure it reads is already
+published by NCDOT and FHWA, and the tool being useful without a login is the point of it.
 
-**Reviewer** — everything needed to do the work: run any scope, all the checks, filters, map,
-CSV export, set a status, write notes, record corrected BH06/BH07 values, save and merge review
-files.
+**Recording a decision needs an account.** Statuses, notes, corrected BH06/BH07 values and
+cleared findings are review work with your name on them, so you sign in first. Open
+**Settings → Reviewer**, type your work email, and press **Email me a sign-in link**. There is no
+password to choose, remember, or share.
 
-**Administrator** — everything above, plus the two things that carry consequences: **clearing a
-finding** (which removes an error or warning from the counts) and **changing the passwords**.
-A reviewer who thinks a finding is wrong writes a note saying so; an administrator decides.
+Your name comes from the account, not from a text box. The database overwrites it from your
+sign-in token as the record is written, so a correction cannot be signed with somebody else's
+name — and the display name is your account's name or the part of your address before the `@`,
+never the whole address, because it appears on a public page.
 
-### Setting them up
+### There used to be a password gate. It is gone, and that is an improvement.
 
-A fresh copy ships with no passwords, opens straight into administrator, and says so. Open
-**Settings → Passwords**, set both, and it downloads
-`NCDOT_BH06_BH07_Validator_configured.html`. **That downloaded file is the one you hand out** —
-the copy you are working in is deliberately left unchanged, so a mistyped password can't lock
-you out of your own file.
+The old version hashed two passwords into the HTML file itself. That reads like protection and
+is not: the file runs on your machine, so opening it in a text editor and deleting the check
+defeated it in seconds. Worse, it invited someone to reuse a real password in a file that then
+gets emailed around.
 
-Same flow to change a password later: admin sets the new one, downloads a fresh configured copy,
-redistributes. There's no recovery — lose the admin password and you set new ones from a fresh
-unconfigured copy.
+What decides anything now is the database. An anonymous visitor can read and nothing else. A
+signed-in reviewer can write reviews and corrections, and **cannot** alter what NCDOT publishes.
+Nobody — signed in or not — can delete anything: a correction supersedes, a cleared finding is
+restored by a later event, and both leave the original in place with a name and a date on it.
 
-### What this actually protects — worth being straight about
-
-Passwords are stored as salted SHA-256 hashes, so nobody can read them out of the file. But
-this is a single HTML file that runs entirely on your machine: **anyone determined enough can
-open it in a text editor and strip the gate out.** It is not encryption and it should not be
-described to anyone as securing data.
-
-That is fine, because there is nothing secret here. Every figure the tool reads is already
-published by NCDOT and FHWA. What the gate protects is the **review record** — it stops
-someone casually clearing 2,000 findings and it makes clear who owns that decision. For that
-job it is exactly right, and it is the correct amount of security for a tool whose inputs are
-all public.
+Forcing the "signed in" flag from the browser console will put the buttons back on screen and
+achieve nothing at all, because the buttons were never what was being checked.
 
 ---
 
@@ -64,9 +61,12 @@ and cannot reach, so you can hand the list to IT rather than guessing. Three hos
 
 | Host | Needed for | If blocked |
 |---|---|---|
-| `gis11.services.ncdot.gov` | all bridge and road data | nothing works — this one is essential |
-| `geo.dot.gov` | the HPMS test (BH06-3) | every other check still runs |
+| `gis11.services.ncdot.gov` | the bridges being tested, and route geometry on the map | nothing works — this one is essential |
+| the Supabase project | everything the bridges are tested against | checks that need reference data cannot run |
 | six tile hosts, below | background map imagery only | **cosmetic, and it self-heals** |
+
+`geo.dot.gov` used to be on this list, for the HPMS test. It is not any more: HPMS is loaded
+into the database by a scheduled job, so a reviewer's machine never contacts FHWA.
 
 Blocked background tiles are the usual complaint, and they are not a real problem. The
 background can come from any of six independent hosts, and **only one of them has to be
@@ -122,17 +122,15 @@ fully populated table.
 **Pin drop** lives on the map, top right — arm it and click anywhere to read the route and
 milepoint at that spot.
 
-Everything else lives behind **Settings**: the review file (save, open, merge), the reviewer
-name, HPMS, the Locate tolerance, Diagnostics, the NCDOT table export and passwords. Each
-individual check is in there too, if you want to re-run just one.
+Everything else lives behind **Settings**: signing in, the review file (save, open, merge),
+HPMS, the Locate tolerance, the vintage of the reference data, Diagnostics and the NCDOT table
+export. Each individual check is in there too, if you want to re-run just one.
 
 Two switches in Settings worth knowing:
 
-- **Fetch HPMS automatically** — on by default, and it only pulls what your scope needs. A single
-  county fetches that county (about 20,000 routes, a few seconds), not the whole state's 213,475.
-  Statewide scope fetches the state. Counties already in memory are never fetched twice, so
-  re-running a county costs nothing and widening to statewide only pulls the counties you don't
-  already have.
+- **Load HPMS automatically** — on by default, and it reads only the counties your scope needs.
+  This used to be a fetch from FHWA that could take a hundred requests; it is now one read of
+  the ingested submittal and takes about as long as a page of search results.
 - **Run the per-structure passes** — on by default. Locate, Resolve carried and Fill missing
   query the road network one structure at a time, so on very large scopes the tool asks before
   starting them.
@@ -157,9 +155,12 @@ errors, tap a structure, read the findings, leave a note.
 
 ### Deep check
 
-The client-side rules run instantly. **Deep check** is the extra pass: it asks Road
-Characteristics how long each route actually is in that county, then flags every milepoint
-that falls outside the route's real extent.
+The client-side rules run instantly. **Deep check** is the extra pass: it looks up how long each
+route actually is in that county, then flags every milepoint that falls outside the route's real
+extent.
+
+Those extents are measured from NCDOT's road network by the quarterly load — **386,644 routes,
+every one of them** — so the check is a lookup rather than a live measurement.
 
 That is the check that catches the most damaging error — **a statewide mile marker number
 entered where the county LRS measure belongs.** NC interstate signs run the length of the
@@ -167,7 +168,8 @@ state (I-85 goes to about 234), but the LRS measure resets to zero at every coun
 never exceeds that county's width. A bridge on I-85 in Mecklenburg reading 38 is provably
 wrong; the route only runs to 21.155 there.
 
-Runs automatically as part of Run all checks. Statewide takes a few minutes.
+Runs automatically as part of Run all checks, and is now fast enough that there is no reason to
+turn it off: a county is two requests, and statewide is a few dozen.
 
 ### Locate check — does the milepoint actually put you at the bridge?
 
@@ -573,14 +575,34 @@ just have to pick the right one.
 
 ## Data sources
 
-All public, no authentication:
+All public, no authentication.
+
+**Read live, from your machine** — the bridges under test, and the geometry the map draws:
 
 ```
 Bridges          gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_Bridges/MapServer/0
-Road network     .../NCDOT_RoadCharacteristicsQtr/MapServer/0
-County boundary  .../NCDOT_CountyBdy_Poly/MapServer/0
+Road geometry    .../NCDOT_RoadCharacteristicsQtr/MapServer/0
 Pin drop         .../NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer
 ```
+
+**Read from the database** — everything the bridges are tested against, loaded by a scheduled
+job rather than by you:
+
+| What | From | Reloaded |
+|---|---|---|
+| County boundaries, and the SAP/FIPS crosswalk | NCDOT_CountyBdy_Poly | quarterly |
+| The SNBI inventory | NCDOT_DynamicStructures, all eight layers | quarterly |
+| Route extents for Deep check | NCDOT_RoadCharacteristicsQtr | quarterly |
+| The HPMS submittal for BH06-3 | FHWA | annually |
+
+**Settings → Data** shows each one's vintage: the date the service itself reported, and when it
+was last loaded. Cite those in a submittal rather than the date you ran the tool. If you know
+NCDOT has republished since the last load, **Reload from NCDOT now** asks the server to re-read;
+it takes a few minutes and needs you signed in, because it is recorded against your account.
+
+One vintage worth noticing: the structures service reports **2020**, while the bridge layer
+reports the current quarter. That gap is NCDOT's, not the tool's, and it is why condition
+ratings can look older than you expect.
 
 Basemap tiles come from whichever of six hosts this network permits — Esri, an Esri mirror,
 USGS National Map, NC OneMap, CARTO, or a road basemap rendered live off gis11 itself. The tool

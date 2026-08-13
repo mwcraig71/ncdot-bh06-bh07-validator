@@ -4,9 +4,10 @@ Validates the two SNBI items most likely to fail a North Carolina bridge submiss
 **BH06 (LRS Route ID)** and **BH07 (LRS Milepoint)** — for any bridge, route, county, or all
 23,022 structures statewide.
 
-Runs entirely in the browser. One HTML file, no install, no login, no ArcGIS licence, nothing
-uploaded anywhere. All data is read live from NCDOT's and FHWA's public services, so it follows
-NCDOT's quarterly republishing on its own.
+Runs in the browser. One HTML file, no install, no ArcGIS licence, nothing uploaded anywhere.
+The bridges under test are read live from NCDOT; the reference data they are tested against is
+loaded quarterly into a Postgres database by a scheduled job, so a reviewer's machine no longer
+has to pull it.
 
 **→ [Open the tool](https://mwcraig71.github.io/ncdot-bh06-bh07-validator/)**
 *(edit this link once Pages is live)*
@@ -58,20 +59,35 @@ never be mistaken for a clean published one.
 This stays strictly separate from clearing a finding: a correction changes *what is tested*,
 clearing changes *whether a finding counts*.
 
-## Reference data is read once
+## Reference data is loaded on a schedule, not by the reviewer
 
-Bridges are re-queried every run, because that is the thing you are asking about.
-Everything behind them is not. County boundaries, the SNBI structure inventory,
-FHWA's HPMS submittal and route geometry are each pulled once for the scope that
-needed them and reused for the rest of the session — a county pull answers every
-single-bridge lookup inside that county, and a statewide pull answers everything.
+Bridges are re-queried every run, because they are the thing under test. Everything they are
+tested *against* is not. County boundaries, the SNBI structure inventory, FHWA's HPMS submittal
+and every route's true extent are pulled quarterly by scheduled Edge Functions and written to
+Postgres; the browser reads the result.
 
-Queries are scoped to what is being asked, too. A single-bridge lookup asks for
-one structure number in one layer: **one request**, where it used to trigger a
-full statewide pull of all eight structure layers before showing a single result.
+That is a different thing from caching them better. The old client asked NCDOT for the same
+reference data on every run and then tried to remember what it had already asked for, which is
+two problems — the traffic, and the bookkeeping about the traffic. Neither exists now: each of
+these is one indexed read, so re-reading is cheaper than deciding whether to.
 
-**Settings → Data cache** shows what is in memory and offers one button to drop
-it all and re-read, for when NCDOT republishes while the page is open.
+What it bought, measured on one county:
+
+| | before | after |
+|---|---|---|
+| a full run, everything on | ~90 s | **9 s** |
+| SNBI inventory | 8 paged ArcGIS layer queries | 1 read |
+| deep check, 434 routes | 4 statistics queries against the road network | 2 reads |
+| HPMS | up to 100 county pulls from `geo.dot.gov` | 1 read |
+
+The route extents are the biggest of these: **386,644 routes**, every one measured from
+NCDOT's road network, so "is this milepoint past the end of the route?" is a join rather than a
+live measurement. Route geometry for the red overlay is still drawn live and still cached per
+route, because it is a map overlay rather than reference data.
+
+**Settings → Data** shows the vintage of each source — what the service itself reported, and
+when it was loaded — because that is what an export has to cite. Beside it, one button asks the
+server to re-read NCDOT now, for when a republish lands between quarters.
 
 ## Some things it established along the way
 
@@ -96,8 +112,8 @@ src/      tool_template.html + build.py — everything is generated from these
 guide/    user guide, deployment notes, and the original findings brief
 data/     the 213,475 NC HPMS route IDs, and review queues
 tools/    a Python CLI for the same checks, for bulk/offline work
-tests/    request-counting cache suite and basemap-fallback suite (Playwright, all endpoints mocked)
-supabase/ database schema as migrations, plus the round-trip verification script
+tests/    Playwright suites — every endpoint mocked, no network needed
+supabase/ database as migrations, the ingest Edge Functions, and the verification scripts
 ```
 
 ## The database
@@ -105,6 +121,11 @@ supabase/ database schema as migrations, plus the round-trip verification script
 The browser tool holds review work in a file each reviewer keeps. That is the right answer for
 one person and the wrong one for a team feeding a March submittal, so the same model now exists
 as a Postgres schema on Supabase — see [`supabase/README.md`](supabase/README.md).
+
+It also holds the reference data the tool reads, loaded by five scheduled Edge Functions —
+one per source. Ingest writes `PUBLISHED` rows only and upserts them, so a republish cannot
+disturb a review; where a republish moves a published value that already carries a review, it
+records a **divergence** and resolves nothing, because that is a person's decision.
 
 The design decision worth knowing from outside: **value sources are rows, not columns.**
 `feature_values` is keyed on `(feature, field, source)` where source is PUBLISHED, DERIVED or
@@ -140,8 +161,9 @@ origin:
 
 | Host | For |
 |---|---|
-| `gis11.services.ncdot.gov` | bridges, road network with LRS measures, county boundaries, NCDOT's own route/milepost tool |
-| `geo.dot.gov` | FHWA's published HPMS submittal |
+| `gis11.services.ncdot.gov` | the bridges under test, route geometry for the map, NCDOT's own route/milepost tool |
+| the Supabase project | everything the bridges are tested against — county boundaries, SNBI inventory, HPMS, route extents |
+| `geo.dot.gov` | FHWA's published HPMS submittal — read by the scheduled ingest, **not** by the browser, so it no longer has to be reachable from a reviewer's machine |
 | `server.arcgisonline.com`, `services.arcgisonline.com`, `basemap.nationalmap.gov`, `services.nconemap.gov`, `basemaps.cartocdn.com` | background map tiles — cosmetic, and **any one** suffices; the tool falls through them automatically. NCDOT roads rendered off `gis11` are the final fallback, so a background is available wherever the data is |
 
 ## Sign-in, and what it is for

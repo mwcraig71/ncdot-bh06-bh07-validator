@@ -1,8 +1,8 @@
 /* Corrections are validated: does a reviewer's fix06/fix07 actually get tested? */
 const {chromium}=require('playwright');const fs=require('fs');
-const counties=fs.readFileSync('tests/fx/counties.json','utf8');
+const sbmock=require('./fx/sbmock.js');
 const bridges=JSON.parse(fs.readFileSync('tests/fx/bridges.json','utf8'));
-const FILE=process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html';
+const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 
 const mk=async(b)=>{
   const ctx=await b.newContext({acceptDownloads:true,viewport:{width:1600,height:1000}});
@@ -16,10 +16,10 @@ const mk=async(b)=>{
   await p.route('**/geo.dot.gov/**',r=>r.fulfill({contentType:'application/json',body:'{"features":[]}'}));
   await p.route('**/gis11.services.ncdot.gov/**',r=>{const u=r.request().url();
     const off=+((u.match(/resultOffset=(\d+)/)||[])[1]||0);
-    if(u.includes('CountyBdy')) return r.fulfill({contentType:'application/json',body:counties});
     if(u.includes('Bridges/MapServer/0/query'))
       return r.fulfill({contentType:'application/json',body:JSON.stringify(off>0?{features:[]}:bridges)});
     return r.fulfill({contentType:'application/json',body:'{"features":[]}'});});
+  await sbmock(p,{bridges});
   return {ctx,p};
 };
 const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+'  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
@@ -33,7 +33,7 @@ const st=(p,bn)=>p.evaluate(n=>{const b=ALL.find(x=>x.BRDG_NBR===n);
   const {p}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));
-  await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(2000);
+  await p.goto('file://'+FILE); await p.waitForTimeout(2000);
   await p.evaluate(()=>{const a=document.getElementById('autoheavy'),h=document.getElementById('autohpms');
     if(a)a.checked=false; if(h)h.checked=false;});
   await p.selectOption('#mode','county'); await p.waitForTimeout(300);

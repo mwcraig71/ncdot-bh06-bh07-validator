@@ -13,7 +13,8 @@ chk(){ # label expected_regex actual
 echo "READS — anon should see everything"
 for t in structures features feature_values findings cleared_findings review \
          route_extents hpms_routes county_codes ingest_runs review_history \
-         feature_resolved feature_value_resolved finding_current structure_status data_vintage; do
+         value_divergence feature_resolved feature_value_resolved finding_current \
+         structure_status data_vintage county_geojson structure_snbi; do
   code=$(curl -s -o /tmp/r.json -w '%{http_code}' "${H[@]}" "$URL/$t?select=*&limit=1")
   chk "SELECT $t" '^200$' "$code"
 done
@@ -37,6 +38,19 @@ chk "UPDATE structures"       '^40[13]$' "$(w PATCH "structures?structure_number
 chk "DELETE feature_values"   '^40[13]$' "$(w DELETE "feature_values?field=eq.BH07")"
 chk "DELETE structures"       '^40[13]$' "$(w DELETE "structures?structure_number=eq.APITEST")"
 chk "DELETE review_history"   '^40[13]$' "$(w DELETE "review_history?id=gt.0")"
+chk "INSERT value_divergence" '^40[13]$' "$(w POST value_divergence "{\"feature_id\":\"$FID\",\"field\":\"BH06\"}")"
+chk "UPDATE county_geojson"   '^40[13]$' "$(w PATCH "county_geojson?sap_code=eq.060" '{"county_name":"NOWHERE"}')"
+
+echo
+echo "THE INGEST TOKEN — readable by nobody, and it must not merely be empty"
+code=$(curl -s -o /tmp/s.json -w '%{http_code}' "${H[@]}" "$URL/ingest_secret?select=*")
+body=$(cat /tmp/s.json)
+chk "SELECT ingest_secret is refused or returns nothing" '^(200|40[13])$' "$code"
+chk "...and no token comes back" '^\[\]$|permission denied|^$' "$body"
+chk "start an ingest without the token" '^40[0-9]$' \
+    "$(curl -s -o /dev/null -w '%{http_code}' "${H[@]}" -X POST \
+       "https://drstmntdbmacdplhjvmx.supabase.co/functions/v1/ingest-counties" -d '{}')"
+chk "call trigger_ingest as anon" '^40[013]$' "$(w POST rpc/trigger_ingest '{"p_source":"bridges"}')"
 
 echo
 echo "the refusal message anon actually gets:"

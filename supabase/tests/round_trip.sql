@@ -114,10 +114,18 @@ begin
     r := r || 'PASS  duplicate (feature, field, source) refused'::text;
   end;
 
-  -- audit trail: 5 inserts + 1 update + 1 delete
+  -- Audit trail. Five inserts and two updates reached the table, but the two
+  -- PUBLISHED inserts are not changes to anything -- their provenance is
+  -- ingest_run_id and their arrival is the ingest_runs row -- so three inserts
+  -- and two updates are recorded. Every REVIEWED and DERIVED write still is.
   select count(*) into cnt from review_history where feature_id=fid and table_name='feature_values';
   r := r || format('%s  history holds one row per change: %s',
-        case when cnt=7 then 'PASS' else 'FAIL' end, cnt);
+        case when cnt=5 then 'PASS' else 'FAIL' end, cnt);
+  select count(*) into cnt from review_history
+   where feature_id=fid and table_name='feature_values'
+     and operation='INSERT' and (after->>'source')='PUBLISHED';
+  r := r || format('%s  a first-time published value is not audited as a change: %s',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
   select count(*) into cnt from review_history
    where feature_id=fid and operation='UPDATE' and changed @> array['withdrawn_at'];
   r := r || format('%s  the withdrawal itself is recorded as a change: %s',
@@ -417,4 +425,150 @@ begin
         case when got is null then 'PASS' else 'FAIL' end, coalesce(got::text,'null'));
 
   raise exception E'BLOCK 2 - GRANTS, RLS AND IDENTITY (rolled back)\n%', array_to_string(r, E'\n');
+end $$;
+
+
+-- ============================================================================
+-- BLOCK 3 — THE INGEST BOUNDARY
+--
+-- Ingest writes PUBLISHED rows and upserts them. The claim worth testing is not
+-- that it writes correctly but that a republish cannot disturb a review: the
+-- review is a row with a different key, so there is no statement the ingest
+-- issues that reaches it. And where a republish contradicts a live review, the
+-- disagreement has to be recorded rather than resolved.
+--
+-- Rolled back like the others.
+-- ============================================================================
+do $$
+declare
+  fid uuid; r text[] := '{}'; cnt int; n numeric; v text; s text; ok boolean;
+  run1 bigint; run2 bigint; ts timestamptz;
+begin
+  insert into ingest_runs (source_service, source_url, publication_label, status)
+  values ('NCDOT_Bridges','test','2026 Q3','ok') returning id into run1;
+  insert into ingest_runs (source_service, source_url, publication_label, status)
+  values ('NCDOT_Bridges','test','2026 Q4','ok') returning id into run2;
+
+  insert into structures (structure_number, county_name, county_sap, ingest_run_id)
+  values ('TEST03','MECKLENBURG','060',run1);
+  insert into features (structure_number, designation, location_type, feature_name)
+  values ('TEST03','H01','C','SR1138 WBL') returning id into fid;
+
+  -- first load
+  insert into feature_values (feature_id, field, source, value_text, ingest_run_id)
+  values (fid,'BH06','PUBLISHED','40401138060',run1);
+  insert into feature_values (feature_id, field, source, value_num, ingest_run_id)
+  values (fid,'BH07','PUBLISHED',0.227,run1);
+
+  select count(*) into cnt from value_divergence where feature_id=fid;
+  r := r || format('%s  a first load raises no divergence: %s',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+
+  -- a republish with no review under it is simply the new truth
+  insert into feature_values (feature_id, field, source, value_num, ingest_run_id)
+  values (fid,'BH07','PUBLISHED',0.231,run2)
+  on conflict (feature_id, field, source)
+  do update set value_num=excluded.value_num, ingest_run_id=excluded.ingest_run_id;
+  select count(*) into cnt from value_divergence where feature_id=fid;
+  select bh07 into n from feature_resolved where feature_id=fid;
+  r := r || format('%s  a republish with no review under it just lands: bh07=%s, %s divergences',
+        case when n=0.231 and cnt=0 then 'PASS' else 'FAIL' end, n, cnt);
+
+  -- now a reviewer disagrees
+  insert into feature_values (feature_id, field, source, value_num, reviewer_name, note)
+  values (fid,'BH07','REVIEWED',0.240,'M. Craig','Measured with Div 10');
+
+  -- ...and NCDOT republishes again, moving the value out from under them
+  insert into feature_values (feature_id, field, source, value_num, ingest_run_id)
+  values (fid,'BH07','PUBLISHED',0.255,run2)
+  on conflict (feature_id, field, source)
+  do update set value_num=excluded.value_num, ingest_run_id=excluded.ingest_run_id;
+
+  select count(*) into cnt from value_divergence where feature_id=fid and field='BH07';
+  r := r || format('%s  a republish under a live review raises a divergence: %s',
+        case when cnt=1 then 'PASS' else 'FAIL' end, cnt);
+
+  select published_before, published_after, reviewed_value
+    into v, s, n from value_divergence where feature_id=fid and field='BH07';
+  r := r || format('%s  ...and records all three numbers: was %s, now %s, reviewed %s',
+        case when v='0.231' and s='0.255' and n=0.240 then 'PASS' else 'FAIL' end, v, s, n);
+
+  select bh07, bh07_source into n, s from feature_resolved where feature_id=fid;
+  r := r || format('%s  the review still wins - the ingest resolved nothing: %s from %s',
+        case when n=0.240 and s='REVIEWED' then 'PASS' else 'FAIL' end, n, s);
+
+  select resolved_at is null and resolution is null into ok
+    from value_divergence where feature_id=fid and field='BH07';
+  r := r || format('%s  and it is left open for a person: unresolved=%s',
+        case when ok then 'PASS' else 'FAIL' end, ok);
+
+  -- an unchanged republish is not news
+  insert into feature_values (feature_id, field, source, value_num, ingest_run_id)
+  values (fid,'BH07','PUBLISHED',0.255,run2)
+  on conflict (feature_id, field, source)
+  do update set value_num=excluded.value_num, ingest_run_id=excluded.ingest_run_id,
+                recorded_at=now();
+  select count(*) into cnt from value_divergence where feature_id=fid and field='BH07';
+  r := r || format('%s  republishing the same number again raises nothing: still %s',
+        case when cnt=1 then 'PASS' else 'FAIL' end, cnt);
+
+  -- a value that disappears upstream is also a divergence
+  delete from feature_values
+   where feature_id=fid and field='BH07' and source='PUBLISHED';
+  select count(*) into cnt from value_divergence
+   where feature_id=fid and field='BH07' and published_after is null;
+  r := r || format('%s  a published value that goes away is a divergence too: %s',
+        case when cnt=1 then 'PASS' else 'FAIL' end, cnt);
+  select bh07, bh07_source into n, s from feature_resolved where feature_id=fid;
+  r := r || format('%s  ...and the review is still what is tested: %s from %s',
+        case when n=0.240 and s='REVIEWED' then 'PASS' else 'FAIL' end, n, s);
+
+  -- withdrawn reviews are not live ones
+  insert into feature_values (feature_id, field, source, value_text, reviewer_name, withdrawn_at)
+  values (fid,'BH06','REVIEWED','40401138999','M. Craig', now());
+  insert into feature_values (feature_id, field, source, value_text, ingest_run_id)
+  values (fid,'BH06','PUBLISHED','40401138061',run2)
+  on conflict (feature_id, field, source)
+  do update set value_text=excluded.value_text, ingest_run_id=excluded.ingest_run_id;
+  select count(*) into cnt from value_divergence where feature_id=fid and field='BH06';
+  r := r || format('%s  a withdrawn review does not make a republish contentious: %s',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+
+  -- who may start or perform an ingest
+  select count(*) into cnt from information_schema.role_routine_grants
+   where routine_name in ('ingest_bridges','ingest_counties','ingest_structures',
+                          'ingest_route_extents','ingest_hpms','ingest_begin','ingest_finish')
+     and grantee in ('anon','authenticated');
+  r := r || format('%s  no client role may execute an ingest function: %s grants',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+
+  select count(*) into cnt from information_schema.role_table_grants
+   where table_name='ingest_secret' and grantee in ('anon','authenticated');
+  r := r || format('%s  and none may read the ingest token: %s grants',
+        case when cnt=0 then 'PASS' else 'FAIL' end, cnt);
+
+  select count(*) into cnt from information_schema.role_routine_grants
+   where routine_name='trigger_ingest' and grantee='authenticated';
+  r := r || format('%s  a signed-in reviewer may still ask for a reload: %s grant',
+        case when cnt>0 then 'PASS' else 'FAIL' end, cnt);
+
+  select count(*) into cnt from cron.job where jobname like 'ingest-%';
+  r := r || format('%s  every source is scheduled: %s jobs',
+        case when cnt=5 then 'PASS' else 'FAIL' end, cnt);
+
+  -- the vintage an export cites
+  select parse_publication_date('Latest Publication Date: 03/15/2026 : 14:05')::date::text into v;
+  r := r || format('%s  publication date parses the bridge-layer format: %s',
+        case when v='2026-03-15' then 'PASS' else 'FAIL' end, v);
+  select parse_publication_date('(Geoservice Date: 7/27/2020)')::date::text into v;
+  r := r || format('%s  ...and the structures format: %s',
+        case when v='2020-07-27' then 'PASS' else 'FAIL' end, v);
+  select parse_publication_date('(Friday, Feb 10, 2023)')::date::text into v;
+  r := r || format('%s  ...and the county format: %s',
+        case when v='2023-02-10' then 'PASS' else 'FAIL' end, v);
+  select parse_publication_date('HPMS 2024 submittal') into ts;
+  r := r || format('%s  ...and returns null rather than guessing: %s',
+        case when ts is null then 'PASS' else 'FAIL' end, coalesce(ts::text,'null'));
+
+  raise exception E'BLOCK 3 - THE INGEST BOUNDARY (rolled back)\n%', array_to_string(r, E'\n');
 end $$;

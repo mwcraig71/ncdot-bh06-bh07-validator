@@ -11,8 +11,9 @@ database actually ran (verified by comparing each file's MD5 against
 
 ```bash
 supabase link --project-ref drstmntdbmacdplhjvmx
-supabase db push          # apply
-supabase db reset         # rebuild from zero, locally
+supabase db push                 # apply
+supabase db reset                # rebuild from zero, locally
+supabase functions deploy        # the five ingests
 psql "$DATABASE_URL" -f supabase/tests/round_trip.sql   # verify
 ```
 
@@ -88,6 +89,8 @@ exported another for exactly that reason.
 | `finding_current` | findings with the latest clear/restore decision applied |
 | `structure_status` | per-structure rollup, cleared findings excluded from the counts |
 | `data_vintage` | latest successful load per service — what an export cites |
+| `county_geojson` | county outlines as GeoJSON, because PostgREST hands back WKB hex |
+| `structure_snbi` | the SNBI columns the browser shows, flattened |
 
 All are `security_invoker`, so RLS is evaluated as the caller and a view can never be a way
 around a policy.
@@ -128,6 +131,8 @@ policies.
 | write `review`, `cleared_findings` | no | yes | yes |
 | write `PUBLISHED` | no | **no** | yes |
 | write structures, findings, HPMS, extents, ingest_runs | no | **no** | yes |
+| resolve a `value_divergence` | no | yes | yes |
+| read `ingest_secret` | **no** | **no** | yes |
 | **DELETE anything** | **no** | **no** | only structures/features |
 | edit or delete audit / clearing history | no | no | **no** |
 
@@ -168,10 +173,14 @@ record.
 
 ## Verification
 
-`tests/round_trip.sql` runs two blocks, each ending in a deliberate exception so the
+`tests/round_trip.sql` runs three blocks, each ending in a deliberate exception so the
 transaction rolls back and nothing persists. Block 1 covers resolution, constraints, the audit
 trail and clearing. Block 2 switches Postgres roles so the RLS policies are genuinely
-exercised — a test that runs as the table owner bypasses RLS and proves nothing.
+exercised — a test that runs as the table owner bypasses RLS and proves nothing. Block 3 covers
+the ingest boundary: that a republish under a live review raises a divergence and resolves
+nothing, that an unchanged republish raises nothing, that a value disappearing upstream counts
+too, that a *withdrawn* review does not make a republish contentious, and that no client role
+can execute an ingest function or read the token.
 
 `tests/anon_api_test.sh` is the stronger half of the same question: it hits PostgREST over
 HTTPS with the publishable key, so grants, RLS and the API layer are exercised together rather
@@ -181,15 +190,73 @@ than simulated with `SET ROLE`.
 supabase/tests/anon_api_test.sh
 ```
 
-Current state: **24 assertions in block 1, 25 in block 2, 32 over the API — all passing.** Both
-database advisors report clean, apart from `unused_index` notices that are expected while the
-tables are empty.
+Current state: **25 assertions in block 1, 25 in block 2, 18 in block 3, 41 over the API — all
+passing.** Both database advisors report clean.
 
 A missing policy fails open in the direction that is hardest to notice, so none of this is
 asserted from reading the migration. It is asserted from a session that actually tried.
 
-## Still to come
+## Ingest
 
-Ingest writes `structures`, `features`, `PUBLISHED` values, `route_extents`, `hpms_routes`
-and `ingest_runs` as the service role. Validation writes `findings`. Neither exists yet, and
-the schema denies both to every client role until they do.
+Five Deno Edge Functions under `functions/`, one per source, each on a schedule that matches how
+its source actually republishes:
+
+| Function | Source | Cadence | Last measured |
+|---|---|---|---|
+| `ingest-counties` | NCDOT_CountyBdy_Poly | quarterly | 100 counties |
+| `ingest-bridges` | NCDOT_Bridges | quarterly | 23,022 rows → 17,159 highway features |
+| `ingest-structures` | NCDOT_DynamicStructures, 8 layers | quarterly | 22,899 rows |
+| `ingest-route-extents` | NCDOT_RoadCharacteristicsQtr | quarterly | 386,644 routes |
+| `ingest-hpms` | FHWA HPMS | annual | 222,402 route IDs |
+
+`pg_cron` calls `trigger_ingest(source)`, which is also what the tool's **Reload from NCDOT
+now** button calls. It refuses to start a second run of a source while one is still going.
+
+**Ingest writes `PUBLISHED` rows only, and upserts.** A republish cannot disturb a review,
+because a review is a row with a different key — `(feature, field, 'REVIEWED')` — and there is
+no statement the ingest issues that reaches it. This is the same property the resolution
+hierarchy has, applied at the boundary where new data arrives.
+
+Where a republish *changes* a published value that already carries a live review, the ingest
+writes a `value_divergence` row and resolves nothing. The review still wins, because it is still
+the higher source; whether it should is a question with a person's name on it. Detection is a
+trigger on `feature_values`, not code in the ingest, for the same reason the audit trail is:
+it must not be possible to write the change and skip the record. Removal is covered too — a
+published value that disappears upstream under a live review raises a divergence with a null
+`published_after`.
+
+Each run records the vintage the service reported **about itself**, verbatim, in
+`ingest_runs.publication_label`, with a parsed timestamp beside it where one could be found.
+Three different formats across four NCDOT services, and FHWA reports none at all — so the label
+says so rather than inventing a date. The `data_vintage` view is what an export cites.
+
+### Two things the services do that the code has to know
+
+**The structures layers cap a page at 1,000 rows, not the 2,000 they accept.** Asking for 2,000
+and stopping when fewer come back truncated every layer at page one: statewide that was 4,367 of
+22,899 structures, silently, and the client looked fine. The pager honours
+`exceededTransferLimit` instead of inferring from the page size.
+
+**The road-network service ignores `resultOffset` on a statistics query.** Offset 0 and offset
+2,000 return the same rows, with `exceededTransferLimit` true — so a pager that trusts it never
+terminates, which is exactly what the first extents run did. The extents ingest therefore slices
+by route class × county and never pages; a slice that still comes back truncated is split again
+by prefixing another digit, recursively, rather than being quietly accepted short. The run
+records how many slices it had to split (**207**, most recently) so a silent truncation would
+show up as a number rather than as a missing route.
+
+### Starting one by hand
+
+The functions sit behind `verify_jwt`, but the anon key is printed in the published page, so JWT
+verification alone would let any visitor start a statewide pull. The second factor is
+`ingest_secret` — a token the database owns, with RLS on and **no policy at all**, so no client
+role can read it. `trigger_ingest` runs as definer, reads the token, and never returns it.
+
+```sql
+select trigger_ingest('bridges');   -- counties | bridges | structures | extents | hpms
+select * from data_vintage;
+select * from ingest_runs order by id desc limit 5;
+```
+
+Divergence behaviour was exercised against real data during the first loads: 7 of 7 cases
+raised a record and left the review standing.

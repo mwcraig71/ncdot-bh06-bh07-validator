@@ -1,9 +1,9 @@
 /* The gate is gone, identity comes from the account, and the client-side
    signed-in flag decides nothing. */
 const {chromium}=require('playwright');const fs=require('fs');
-const counties=fs.readFileSync('tests/fx/counties.json','utf8');
+const sbmock=require('./fx/sbmock.js');
 const bridges=JSON.parse(fs.readFileSync('tests/fx/bridges.json','utf8'));
-const FILE=process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html';
+const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 
 const SB='https://drstmntdbmacdplhjvmx.supabase.co';
 const mk=async(b,opts={})=>{
@@ -21,10 +21,10 @@ const mk=async(b,opts={})=>{
   await p.route('**/geo.dot.gov/**',r=>r.fulfill({contentType:'application/json',body:'{"features":[]}'}));
   await p.route('**/gis11.services.ncdot.gov/**',r=>{const u=r.request().url();
     const off=+((u.match(/resultOffset=(\d+)/)||[])[1]||0);
-    if(u.includes('CountyBdy')) return r.fulfill({contentType:'application/json',body:counties});
     if(u.includes('Bridges/MapServer/0/query'))
       return r.fulfill({contentType:'application/json',body:JSON.stringify(off>0?{features:[]}:bridges)});
     return r.fulfill({contentType:'application/json',body:'{"features":[]}'});});
+  await sbmock(p,{bridges});
   // Supabase auth, mocked so the suite needs no network and no real account
   await p.route(SB+'/auth/v1/**',async r=>{
     const u=r.request().url();
@@ -41,7 +41,7 @@ const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+' 
   const {p,authCalls}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));
-  await p.goto('file://'+require('path').resolve(FILE)); await p.waitForTimeout(2200);
+  await p.goto('file://'+FILE); await p.waitForTimeout(2200);
 
   console.log('\nFILE: '+FILE.split('/').pop());
 
