@@ -1,0 +1,2372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NCDOT SNBI BH06 / BH07 Validator</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&family=Open+Sans:wght@300;400;600;700&family=Lato:wght@100;300;400;700&display=swap">
+<style>
+:root{
+  --orange:#CF3910; --orange-dark:#A82C08; --orange-tint:#FBE7DF;
+  --black:#1A1A1A; --navy:#003388; --navy-dark:#002466;
+  --gray:#313131; --gray-2:#5A5A5A; --gray-3:#9A9A9A;
+  --line:#DDDDDD; --bg-gray:#F4F4F4;
+  --ok:#2E7D32; --info:#1E56B3; --warn:#C9A227; --err:#CF3910;
+  --ok-t:#E6F1E6; --info-t:#E3ECFA; --warn-t:#FAF2D9; --err-t:#FBE7DF;
+  --font-h:'Oswald',Arial,sans-serif; --font-b:'Open Sans',Arial,sans-serif; --font-d:'Lato',Arial,sans-serif;
+  --ease:cubic-bezier(.2,.6,.2,1);
+}
+*{box-sizing:border-box}
+/* Chromium's UA sheet uses font-weight:bolder for b/strong, which is RELATIVE —
+   inside this 300-weight body that resolves to 400 and no emphasis renders. */
+b,strong{font-weight:700}
+html,body{margin:0;height:100%;font-family:var(--font-b);font-weight:300;font-size:14px;color:var(--gray);background:#fff;-webkit-font-smoothing:antialiased}
+body{display:flex;flex-direction:column;overflow:hidden}
+h1,h2,h3,h4{font-family:var(--font-h);text-transform:uppercase;margin:0;letter-spacing:.01em;line-height:1.15}
+button,input,select{font-family:var(--font-b);font-size:13px}
+button{cursor:pointer;border-radius:0}
+.tnum{font-variant-numeric:tabular-nums}
+
+/* ---------- header ---------- */
+header{display:flex;align-items:center;gap:20px;padding:10px 18px;border-bottom:1px solid var(--line);
+  border-top:4px solid var(--orange);background:#fff;flex:0 0 auto;z-index:1200}
+header img{height:26px;display:block}
+.hdr-t h1{font-size:19px;font-weight:700;color:var(--black)}
+.hdr-t .sub{font-family:var(--font-h);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--orange);margin-top:2px}
+.hdr-sp{flex:1}
+.hdr-meta{font-size:11px;color:var(--gray-3);text-align:right;line-height:1.5}
+.hdr-meta b{color:var(--gray-2);font-weight:600}
+
+/* ---------- toolbar ---------- */
+.toolbar{display:flex;align-items:center;gap:10px;padding:9px 18px;border-bottom:1px solid var(--line);
+  background:var(--bg-gray);flex:0 0 auto;flex-wrap:wrap;z-index:1100}
+.tb-lab{font-family:var(--font-h);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray-2)}
+select,input[type=text]{padding:6px 9px;border:1px solid var(--line);background:#fff;color:var(--gray);border-radius:0}
+input[type=text]{width:190px}
+select:focus,input:focus,button:focus{outline:2px solid var(--orange);outline-offset:2px}
+.btn{padding:7px 15px;background:var(--navy);color:#fff;border:1px solid var(--navy);font-family:var(--font-h);
+  font-size:12px;letter-spacing:.12em;text-transform:uppercase;transition:background var(--ease) 120ms}
+.btn:hover{background:var(--navy-dark)}
+.btn.primary{background:var(--orange);border-color:var(--orange)}
+.btn.primary:hover{background:var(--orange-dark)}
+.btn.ghost{background:#fff;color:var(--gray);border:1px solid var(--line)}
+.btn.ghost:hover{border-color:var(--orange);color:var(--orange)}
+.btn.ghost.on{background:var(--orange);color:#fff;border-color:var(--orange)}
+.btn[disabled]{opacity:.4;pointer-events:none}
+
+/* ---------- layout ---------- */
+main{flex:1;display:flex;min-height:0}
+#side{width:322px;flex:0 0 auto;border-right:1px solid var(--line);overflow-y:auto;background:#fff}
+#content{flex:1;display:flex;flex-direction:column;min-width:0}
+#map{flex:1;min-height:180px;background:#e9e9e5}
+#tablewrap{height:44%;min-height:120px;border-top:1px solid var(--line);display:flex;flex-direction:column;background:#fff}
+.splitter{height:6px;background:var(--bg-gray);border-top:1px solid var(--line);cursor:row-resize;flex:0 0 auto}
+.splitter:hover{background:var(--orange-tint)}
+
+/* ---------- sidebar ---------- */
+.sec{border-bottom:1px solid var(--line);padding:14px 16px}
+.sec h3{font-size:12px;font-weight:500;letter-spacing:.18em;color:var(--black);margin-bottom:10px;
+  display:flex;align-items:center;justify-content:space-between}
+.sec h3 .n{font-family:var(--font-b);font-weight:600;letter-spacing:0;color:var(--gray-3);font-size:11px}
+.hint{font-size:11.5px;color:var(--gray-3);line-height:1.5;margin:8px 0 0}
+
+/* summary tiles */
+.tiles{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line)}
+.tile{background:#fff;padding:9px 10px}
+.tile .v{font-family:var(--font-d);font-weight:300;font-size:25px;line-height:1;color:var(--black)}
+.tile .k{font-family:var(--font-h);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--gray-2);margin-top:4px}
+.tile.err .v{color:var(--err)} .tile.warn .v{color:#8a6f11} .tile.ok .v{color:var(--ok)}
+
+/* bar meter */
+.meter{display:flex;height:9px;border:1px solid var(--line);margin-top:10px;background:#fff}
+.meter i{display:block;height:100%;border-right:2px solid #fff}
+.meter i:last-child{border-right:0}
+.mlegend{display:flex;flex-wrap:wrap;gap:4px 12px;margin-top:8px;font-size:11px;color:var(--gray-2)}
+.mlegend span{display:flex;align-items:center;gap:5px}
+.sw{width:9px;height:9px;flex:0 0 auto;border:1px solid rgba(0,0,0,.18)}
+
+/* check rows */
+.chk{display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px dotted #eee;cursor:pointer;font-size:12.5px}
+.chk:last-child{border-bottom:0}
+.chk input{margin:2px 0 0;accent-color:var(--orange);flex:0 0 auto}
+.chk .lb{flex:1;line-height:1.35}
+.chk .lb em{font-style:normal;display:block;font-size:10.5px;color:var(--gray-3);margin-top:1px}
+.grp{display:flex;align-items:center;gap:7px;font-family:var(--font-h);font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:#fff;background:var(--black);padding:4px 5px 4px 8px;margin:16px 0 0}
+.grp:first-child{margin-top:0}
+.grp span:first-child{flex:1}
+.grp .gn{font-family:var(--font-b);font-weight:600;letter-spacing:0;font-size:11px;
+  background:var(--orange);padding:1px 6px}
+.grp .gsel{font-family:var(--font-h);font-size:9px;letter-spacing:.12em;text-transform:uppercase;
+  background:none;border:1px solid rgba(255,255,255,.5);color:#fff;padding:2px 6px}
+.grp .gsel:hover{background:var(--orange);border-color:var(--orange)}
+#revdot{display:none;width:7px;height:7px;background:#CF3910;border-radius:50%;margin-left:6px;vertical-align:1px}
+.reftab{width:100%;table-layout:fixed;border-collapse:collapse;font-size:11.5px;color:var(--gray-2)}
+.reftab td{padding:3px 0;vertical-align:top;line-height:1.4;white-space:normal;overflow-wrap:anywhere}
+.reftab td:first-child{width:60px;white-space:nowrap;padding-right:6px}
+.reflist{margin:8px 0 0;padding-left:16px;font-size:11.5px;color:var(--gray-2);line-height:1.5}
+.reflist li{margin-bottom:5px}
+#reftog{cursor:pointer;color:var(--navy);text-decoration:underline}
+#reftog:hover{color:var(--orange)}
+.gsub{font-size:10.5px;color:var(--gray-3);margin:4px 0 2px;line-height:1.35}
+.rcode{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:9.5px;background:var(--black);color:#fff;padding:1px 4px;margin-right:3px}
+.chk .ct{font-variant-numeric:tabular-nums;font-weight:600;font-size:11.5px;color:var(--gray-2);flex:0 0 auto}
+.sev{display:inline-block;width:8px;height:8px;margin-right:5px;vertical-align:1px}
+.f-row{display:flex;gap:8px;align-items:center;margin-bottom:8px}
+.f-row label{font-size:11px;color:var(--gray-2);width:74px;flex:0 0 auto;
+  font-family:var(--font-h);letter-spacing:.1em;text-transform:uppercase}
+.f-row select,.f-row input{flex:1;width:100%;min-width:0}
+
+/* ---------- table ---------- */
+.tbar{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--line);background:var(--bg-gray)}
+.tbar .ttl{font-family:var(--font-h);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--black)}
+.tbar .sp{flex:1}
+.tscroll{flex:1;overflow:auto}
+#tscroll table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+#tscroll thead th{position:sticky;top:0;background:#fff;border-bottom:2px solid var(--black);text-align:left;
+  padding:7px 9px;font-family:var(--font-h);font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;
+  color:var(--black);white-space:nowrap;cursor:pointer;z-index:2;font-weight:500}
+#tscroll thead th:hover{color:var(--orange)}
+#tscroll thead th .ar{color:var(--orange);font-size:9px}
+#tscroll tbody td{padding:5px 9px;border-bottom:1px solid #f0f0f0;white-space:nowrap}
+#tscroll tbody tr{cursor:pointer}
+#tscroll tbody tr:hover{background:var(--orange-tint)}
+#tscroll tbody tr.sel{background:var(--orange-tint);box-shadow:inset 3px 0 0 var(--orange)}
+td.mono{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
+.badge{display:inline-block;font-family:var(--font-h);font-size:9.5px;letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 6px;border:1px solid currentColor;margin-right:3px}
+.b-err{color:var(--err);background:var(--err-t)} .b-warn{color:#8a6f11;background:var(--warn-t)}
+.b-info{color:var(--info);background:var(--info-t)} .b-ok{color:var(--ok);background:var(--ok-t)}
+
+/* ---------- drawer ---------- */
+#drawer{position:fixed;top:0;right:0;width:392px;max-width:94vw;height:100%;background:#fff;
+  border-left:1px solid var(--line);box-shadow:-8px 0 28px rgba(0,0,0,.12);transform:translateX(100%);
+  transition:transform 220ms var(--ease);z-index:1500;display:flex;flex-direction:column}
+#drawer.open{transform:none}
+.dr-h{padding:14px 16px;border-bottom:1px solid var(--line);border-top:4px solid var(--orange);display:flex;align-items:flex-start;gap:10px}
+.dr-h h2{font-size:22px;font-weight:700;color:var(--black)}
+.dr-h .s{font-family:var(--font-h);font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray-2);margin-top:3px}
+.dr-x{margin-left:auto;background:none;border:0;font-size:22px;color:var(--gray-3);line-height:1;padding:0 2px}
+.dr-x:hover{color:var(--orange)}
+.dr-b{flex:1;overflow-y:auto;padding:0 16px 20px}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:5px 10px;font-size:12.5px;margin:10px 0 0}
+.kv dt{font-family:var(--font-h);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray-2);padding-top:2px}
+.kv dd{margin:0;color:var(--black);word-break:break-word}
+.big{border:1px solid var(--line);border-top:3px solid var(--orange);padding:11px 13px;margin-top:14px;background:#fff}
+.big .k{font-family:var(--font-h);font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray-2)}
+.big .v{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:22px;color:var(--black);margin-top:3px;letter-spacing:-.01em}
+.big .d{font-size:11.5px;color:var(--gray-3);margin-top:4px;line-height:1.45}
+.dr-sec{font-family:var(--font-h);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--black);
+  margin:20px 0 8px;padding-bottom:5px;border-bottom:2px solid var(--black)}
+.find{border:1px solid var(--line);border-left:3px solid var(--gray-3);padding:8px 11px;margin-bottom:7px;font-size:12px;line-height:1.5}
+.find.e{border-left-color:var(--err);background:var(--err-t)}
+.find.w{border-left-color:var(--warn);background:var(--warn-t)}
+.find.i{border-left-color:var(--info);background:var(--info-t)}
+.revbox{border:1px solid var(--line);border-top:3px solid var(--navy);padding:10px 12px;margin-top:12px;background:var(--bg-gray)}
+.revrow{display:flex;gap:6px;align-items:center;margin-bottom:7px}
+.revrow label{font-family:var(--font-h);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--gray-2);width:74px;flex:0 0 auto}
+.revrow select{flex:1}
+.revbox textarea{width:100%;border:1px solid var(--line);padding:7px 9px;font-family:var(--font-b);font-size:12.5px;resize:vertical;border-radius:0}
+.revbox textarea:focus{outline:2px solid var(--orange);outline-offset:1px}
+.revmeta{font-size:10.5px;color:var(--gray-3);margin-top:6px}
+.clrnote{font-size:10.5px;color:var(--gray-2);margin-top:6px;padding-top:5px;border-top:1px dotted rgba(0,0,0,.15)}
+.clrnote a{color:var(--navy);text-decoration:underline}
+.clrnote a:hover{color:var(--orange)}
+.find.isclr{opacity:.5}
+.find.isclr b{text-decoration:line-through}
+.find b{font-family:var(--font-h);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;display:block;margin-bottom:2px;color:var(--black)}
+.decode{display:flex;gap:2px;margin-top:9px}
+.decode div{flex:1;text-align:center;border:1px solid var(--line);padding:5px 2px;background:#fff}
+.decode div.hl{border-color:var(--orange);background:var(--orange-tint)}
+.decode .dg{font-family:ui-monospace,monospace;font-size:15px;color:var(--black)}
+.decode .dl{font-family:var(--font-h);font-size:8px;letter-spacing:.06em;text-transform:uppercase;color:var(--gray-2);margin-top:2px;line-height:1.2}
+
+/* ---------- misc ---------- */
+.tb-note{font-size:11px;color:var(--gray-2)}
+#settings{position:fixed;inset:0;background:rgba(26,26,26,.5);z-index:3800;display:none;
+  align-items:flex-start;justify-content:center;padding:26px 16px;overflow:auto}
+#settings.on{display:flex}
+.setbox{background:#fff;border-top:4px solid var(--orange);width:520px;max-width:100%;
+  box-shadow:0 8px 28px rgba(0,0,0,.24)}
+.sethead{display:flex;align-items:center;padding:14px 18px;border-bottom:1px solid var(--line)}
+.sethead h2{font-size:18px;font-weight:700;color:var(--black);flex:1}
+.setbody{padding:4px 18px 20px}
+.setsec{padding:14px 0;border-bottom:1px solid var(--line)}
+.setsec:last-child{border-bottom:0}
+.setsec h4{font-family:var(--font-h);font-size:11px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--black);margin:0 0 9px;font-weight:500}
+.setbtns{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.setbtns .btn{flex:0 0 auto}
+.setsec .revrow label{width:78px}
+.setsec .revrow input[type=text]{flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:0;min-width:0}
+.mtabs{display:none}
+#gate,#admin{position:fixed;inset:0;background:var(--navy);z-index:4000;display:none;
+  align-items:center;justify-content:center;padding:20px}
+#gate.on,#admin.on{display:flex}
+.gatebox{background:#fff;border-top:4px solid var(--orange);padding:30px 32px;width:380px;max-width:94vw;
+  box-shadow:0 8px 28px rgba(0,0,0,.28)}
+.gatebox h2{font-size:19px;font-weight:700;color:var(--black);text-transform:uppercase;line-height:1.25}
+.gsub2{font-size:12.5px;color:var(--gray-2);margin:6px 0 16px}
+.gatebox input[type=password]{width:100%;padding:9px 11px;border:1px solid var(--line);font-size:14px;border-radius:0}
+.gatebox input[type=password]:focus{outline:2px solid var(--orange);outline-offset:1px}
+.gatebox .revrow label{width:78px}
+.gatebox .revrow input{flex:1;padding:7px 9px;border:1px solid var(--line);border-radius:0;min-width:0}
+#gateerr,#pw-msg{font-size:12px;color:var(--err);margin-top:10px;min-height:16px;line-height:1.45}
+.gfoot{font-size:10.5px;color:var(--gray-3);margin:16px 0 0;line-height:1.5}
+#rolebadge{font-family:var(--font-h);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  border:1px solid var(--line);padding:2px 7px;color:var(--gray-2)}
+#rolebadge.adm{border-color:var(--orange);color:var(--orange)}
+/* ---------------- phone / tablet ---------------- */
+@media (max-width:860px){
+  header{padding:8px 12px;gap:10px}
+  header img{height:20px}
+  .hdr-t h1{font-size:14px}
+  .hdr-t .sub{display:none}
+  .hdr-meta{display:none}
+  .toolbar{padding:8px 10px;gap:7px}
+  .toolbar .tb-lab{display:none}
+  .toolbar select,.toolbar input[type=text]{flex:1 1 120px;min-width:0;font-size:16px;padding:9px}
+  input,select,textarea{font-size:16px}
+  #argwrap{flex:1 1 150px;display:flex;gap:6px;min-width:0}
+  #argwrap select,#argwrap input{width:100%}
+  .toolbar .btn{padding:10px 13px;font-size:12px}
+  .hdr-sp{display:none}
+  .tb-note{width:100%;order:9}
+
+  .mtabs{display:flex;flex:0 0 auto;border-bottom:1px solid var(--line);background:#fff}
+  .mtabs button{flex:1;padding:12px 4px;background:#fff;border:0;border-bottom:3px solid transparent;
+    font-family:var(--font-h);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gray-2)}
+  .mtabs button.on{color:var(--orange);border-bottom-color:var(--orange)}
+
+  main{flex-direction:column;min-height:0}
+  #side{width:100%;border-right:0;flex:1 1 auto}
+  #content{flex:1 1 auto;min-height:0}
+  .splitter{display:none}
+  #tablewrap{height:auto;flex:1 1 auto;border-top:0}
+  #map{flex:1 1 auto}
+  /* one pane at a time */
+  main > #side,main > #content{display:none}
+  body.pane-side  main > #side{display:block}
+  body.pane-map     main > #content{display:flex}
+  body.pane-map     #tablewrap{display:none}
+  body.pane-tablewrap main > #content{display:flex}
+  body.pane-tablewrap #map{display:none}
+  body.pane-tablewrap .splitter{display:none}
+
+  #drawer{width:100%;max-width:100%}
+  .revrow{flex-wrap:wrap}
+  .revrow label{width:100%;margin-bottom:2px}
+  .revrow input[type=text],.revrow input[type=password],.revrow select{flex:1 1 100px;min-width:0;font-size:16px}
+  .kv{grid-template-columns:104px 1fr}
+  .decode div{padding:5px 1px}
+  .decode .dg{font-size:13px}
+  .tbar .ttl,.tbar .sp{display:none}
+  .tbar span[style]{display:none}
+  .dr-b{padding:0 14px 24px}
+  .tiles{grid-template-columns:1fr 1fr}
+  #tscroll tbody td,#tscroll thead th{padding:9px 8px}
+  .chk{padding:9px 0}
+  .chk input{width:18px;height:18px}
+  .gatebox{padding:24px 20px}
+  #settings{padding:0}
+  .setbox{width:100%;min-height:100%;border-top-width:3px}
+  .leaflet-control-zoom a{width:34px;height:34px;line-height:34px}
+  .pinctl button{padding:11px 14px;font-size:12px}
+}
+@media (max-width:520px){
+  .hdr-t h1{font-size:12.5px}
+  .tiles{grid-template-columns:1fr 1fr}
+  .toolbar .btn{flex:1 1 auto}
+}
+#toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(20px);background:var(--black);
+  color:#fff;padding:10px 20px;font-size:13px;z-index:3000;opacity:0;pointer-events:none;transition:all 220ms var(--ease);max-width:80vw}
+#toast.show{opacity:1;transform:translateX(-50%)}
+#busy{position:fixed;inset:0;background:rgba(255,255,255,.86);z-index:2500;display:none;
+  flex-direction:column;align-items:center;justify-content:center;gap:14px}
+#busy.on{display:flex}
+.bar{width:280px;height:5px;background:var(--line);overflow:hidden}
+.bar i{display:block;height:100%;background:var(--orange);width:0;transition:width 180ms linear}
+#busy .m{font-family:var(--font-h);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--black)}
+#busy .s{font-size:12px;color:var(--gray-2);margin-top:-6px}
+.leaflet-container{font-family:var(--font-b)}
+.leaflet-popup-content-wrapper{border-radius:0;box-shadow:0 2px 8px rgba(0,0,0,.18)}
+.leaflet-popup-content{margin:11px 13px;font-size:12.5px;line-height:1.55}
+.pop-t{font-family:var(--font-h);font-size:14px;font-weight:500;text-transform:uppercase;color:var(--black);
+  border-bottom:2px solid var(--orange);padding-bottom:3px;margin-bottom:6px}
+.pop-k{color:var(--gray-2);font-size:11px}
+.pop-v{font-family:ui-monospace,monospace;color:var(--black)}
+.pinctl{border:0;box-shadow:none}
+.pinctl button{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);
+  padding:8px 12px;font-family:var(--font-h);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--gray);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.18)}
+.pinctl button:hover{border-color:var(--orange);color:var(--orange)}
+.pinctl button.on{background:var(--orange);border-color:var(--orange);color:#fff}
+.pindot{width:9px;height:9px;border:2px solid currentColor;border-radius:50% 50% 50% 0;
+  transform:rotate(-45deg);flex:0 0 auto}
+.pinctl button.on .pindot{background:#fff;border-color:#fff}
+.maplegend{background:#fff;border:1px solid var(--line);padding:8px 10px;font-size:11px;line-height:1.7;box-shadow:var(--shadow-md)}
+.maplegend b{font-family:var(--font-h);font-size:10px;letter-spacing:.14em;text-transform:uppercase;display:block;margin-bottom:4px;color:var(--black)}
+.maplegend span{display:flex;align-items:center;gap:6px}
+.pinmode #map{cursor:crosshair}
+.empty{padding:34px;text-align:center;color:var(--gray-3);font-size:13px}
+.empty b{display:block;font-family:var(--font-h);font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray-2);margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <img src="data:image/png;base64,__LOGO_B64__" alt="Strinteg Corporation">
+  <div class="hdr-t">
+    <h1>NCDOT SNBI BH06 / BH07 Validator</h1>
+    <div class="sub">LRS Route ID &amp; Milepoint &middot; FHWA rules + QC &middot; Live NCDOT GIS</div>
+  </div>
+  <div class="hdr-sp"></div>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:5px;margin-right:14px">
+    <!--ROLE-START--><span id="rolebadge">Administrator</span><!--ROLE-END-->
+  </div>
+  <div class="hdr-meta">
+    Data: <b>NCDOT public ArcGIS REST</b><br>
+    Bridges, Road Characteristics, County Boundary<br>
+    <span id="pubdate">connecting&hellip;</span>
+  </div>
+</header>
+
+<div class="toolbar">
+  <span class="tb-lab">Scope</span>
+  <select id="mode">
+    <option value="bridge">Single bridge</option>
+    <option value="route">All bridges on a route</option>
+    <option value="county" selected>All bridges in a county</option>
+    <option value="all">All bridges statewide</option>
+  </select>
+  <span id="argwrap"></span>
+  <button class="btn primary" id="run">Run all checks</button>
+  <span class="hdr-sp"></span>
+  <span id="hpmsn" class="tb-note"></span>
+  <button class="btn ghost" id="csv" disabled>Export CSV</button>
+  <button class="btn ghost" id="setbtn" title="Review files, HPMS, tools and network">Settings<span id="revdot"></span></button>
+</div>
+
+<nav class="mtabs">
+  <button data-pane="side">Filters</button>
+  <button data-pane="map" class="on">Map</button>
+  <button data-pane="tablewrap">Results</button>
+</nav>
+
+<main>
+  <aside id="side">
+    <div class="sec">
+      <h3>Summary <span class="n" id="sumn"></span></h3>
+      <div class="tiles">
+        <div class="tile"><div class="v tnum" id="t-tot">&ndash;</div><div class="k">Bridges</div></div>
+        <div class="tile ok"><div class="v tnum" id="t-ok">&ndash;</div><div class="k">Clean</div></div>
+        <div class="tile err"><div class="v tnum" id="t-fhwa">&ndash;</div><div class="k">Fails FHWA</div></div>
+        <div class="tile err"><div class="v tnum" id="t-silent">&ndash;</div><div class="k">Wrong, passes FHWA</div></div>
+      </div>
+      <div class="tiles" style="grid-template-columns:1fr 1fr;border-top:0">
+        <div class="tile warn"><div class="v tnum" id="t-warn">&ndash;</div><div class="k">Warnings</div></div>
+        <div class="tile"><div class="v tnum" id="t-note">&ndash;</div><div class="k">Notes</div></div>
+      </div>
+      <div class="meter" id="meter"></div>
+      <div class="mlegend">
+        <span><i class="sw" style="background:#CF3910"></i>Error</span>
+        <span><i class="sw" style="background:#C9A227"></i>Warning</span>
+        <span><i class="sw" style="background:#1E56B3"></i>Note</span>
+        <span><i class="sw" style="background:#2E7D32"></i>Clean</span>
+      </div>
+      <p class="hint" id="scopehint">Choose a scope and press Run.</p>
+    </div>
+
+    <div class="sec">
+      <h3>Potential problems <span class="n">click to filter</span></h3>
+      <button class="btn ghost" id="silentbtn" style="width:100%;margin-bottom:10px"
+        title="Bridges that clear every FHWA rule and are still wrong">Show what submits clean but is wrong</button>
+      <div id="checks"></div>
+      <p class="hint">FHWA checks are what fail on submission. QC checks catch values that submit clean and are
+      still wrong &mdash; FHWA tests BH07 only for numeric and length, never for whether the milepoint is on the route.</p>
+    </div>
+
+    <div class="sec">
+      <h3>Review <span class="n" id="revn"></span></h3>
+      <div class="f-row"><label>Status</label><select id="f-rev"><option value="">All</option>
+        <option value="__none">Not reviewed</option><option value="__any">Reviewed (any)</option>
+        <option value="open">Open</option><option value="progress">In progress</option>
+        <option value="fixed">Fixed at source</option><option value="notissue">Not an issue</option>
+        <option value="accepted">Accepted as-is</option>
+        <option value="__note">Has a note</option><option value="__cleared">Has cleared findings</option></select></div>
+      <div class="chk"><input type="checkbox" id="hidecleared"><span class="lb">Hide cleared findings<em>counts and filters ignore anything cleared</em></span></div>
+      <p class="hint" id="revsum" style="margin-top:6px"></p>
+    </div>
+
+    <div class="sec">
+      <h3>Filters</h3>
+      <div class="f-row"><label>Search</label><input type="text" id="f-q" placeholder="bridge no, carried, crossed"></div>
+      <div class="f-row"><label>County</label><select id="f-county"><option value="">All</option></select></div>
+      <div class="f-row"><label>Division</label><select id="f-div"><option value="">All</option></select></div>
+      <div class="f-row"><label>Rte class</label><select id="f-class"><option value="">All</option></select></div>
+      <div class="f-row"><label>Inv. code</label><select id="f-inv"><option value="">All</option></select></div>
+      <div class="f-row"><label>Maint.</label><select id="f-maint"><option value="">All</option></select></div>
+      <div class="f-row"><label>Struct type</label><select id="f-stype"><option value="">All</option></select></div>
+      <div class="f-row"><label>Worst cond</label><select id="f-cond"><option value="">All</option>
+        <option value="4">4 or worse (Poor+)</option><option value="5">5 or worse (Fair+)</option>
+        <option value="6">6 or worse</option><option value="3">3 or worse (Serious+)</option></select></div>
+      <div class="f-row"><label>BH07 min</label><input type="text" id="f-mpmin" placeholder="0.000"></div>
+      <div class="f-row"><label>BH07 max</label><input type="text" id="f-mpmax" placeholder="99.999"></div>
+      <button class="btn ghost" id="clearf" style="width:100%;margin-top:4px">Clear filters</button>
+    </div>
+
+    <div class="sec">
+      <h3>Map layers</h3>
+      <div class="chk"><input type="checkbox" id="l-county" checked><span class="lb">County boundaries<em>LRS mileposts reset at every county line</em></span></div>
+      <div class="chk"><input type="checkbox" id="l-label"><span class="lb">County names</span></div>
+      <div class="chk"><input type="checkbox" id="l-route"><span class="lb">Route of selected bridge<em>drawn from Road Characteristics</em></span></div>
+      <p class="hint" id="tilenote" style="display:none;color:#8a6f11;margin:0 0 8px">
+        Background tiles are blocked on this network, so the map is drawing county outlines only.
+        Everything else works. IT would need to allow <b>server.arcgisonline.com</b>.</p>
+      <div class="f-row" style="margin-top:10px"><label>Basemap</label><select id="f-base">
+        <option value="street">Street</option><option value="gray">Light gray</option>
+        <option value="topo">Topographic</option><option value="imagery">Imagery</option>
+      </select></div>
+    </div>
+
+    <div class="sec">
+      <h3>Reference <span class="n" id="reftog">show</span></h3>
+      <div id="refbody" style="display:none">
+        <table class="reftab">
+          <tr><td><span class="rcode">BH06-1</span></td><td>Not null, &le;120 characters. Required where a highway is carried.</td></tr>
+          <tr><td><span class="rcode">BH06-3</span></td><td>Must appear in the state&rsquo;s HPMS submittal.</td></tr>
+          <tr><td><span class="rcode">BH06-4</span></td><td>Not reported where B.H.18 shows the feature is carried on another bridge.</td></tr>
+          <tr><td><span class="rcode">BH07-1</span></td><td>Valid numeric value.</td></tr>
+          <tr><td><span class="rcode">BH07-2</span></td><td>8 digits maximum.</td></tr>
+        </table>
+        <p class="hint" style="margin-top:10px"><b>That is every FHWA check.</b> Nothing tests whether the
+        milepoint is near the route &mdash; that is what the QC group is for.</p>
+        <ul class="reflist">
+          <li>BH06 is the route <b>carried on</b> the bridge, never the one below.</li>
+          <li>Concurrent routes on one deck still get a single BH06 / BH07.</li>
+          <li>BH07 is county-scoped &mdash; it <b>resets to 0 at every county line</b> and is not the mile marker sign number.</li>
+          <li>Measures follow the road, round every curve. Locate check proves it per bridge.</li>
+          <li>BH07 is handled at three decimals throughout; the unrounded source is kept in the CSV.</li>
+        </ul>
+        <p class="hint">Full detail is in the user guide that ships with this tool.</p>
+      </div>
+    </div>
+  </aside>
+
+  <div id="content">
+    <div id="map"></div>
+    <div class="splitter" id="split"></div>
+    <div id="tablewrap">
+      <div class="tbar">
+        <span class="ttl">Results</span>
+        <span class="n" id="tcount" style="font-size:11.5px;color:var(--gray-2)"></span>
+        <span class="sp"></span>
+        <span style="font-size:11px;color:var(--gray-3)">click a row to inspect &middot; click a header to sort &middot;
+          <span style="color:#2E7D32">&#9670; derived</span> values are proposals, not NCDOT's published data</span>
+      </div>
+      <div class="tscroll" id="tscroll">
+        <div class="empty"><b>No data loaded</b>Pick a scope above and press Run.</div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<div id="drawer"><div class="dr-h"><div id="dr-title"></div><button class="dr-x" id="dr-x">&times;</button></div><div class="dr-b" id="dr-body"></div></div>
+<div id="busy"><div class="m" id="busy-m">Working</div><div class="bar"><i id="busy-i"></i></div><div class="s" id="busy-s"></div></div>
+<div id="toast"></div>
+
+<!--GATE-START--><div id="gate">
+  <div class="gatebox">
+    <img src="data:image/png;base64,__LOGO_B64__" alt="Strinteg Corporation" style="height:24px;display:block;margin-bottom:18px">
+    <h2>NCDOT SNBI BH06 / BH07 Validator</h2>
+    <p class="gsub2">Enter the password you were given.</p>
+    <input type="password" id="gatepw" placeholder="Password" autocomplete="off">
+    <button class="btn primary" id="gatego" style="width:100%;margin-top:10px">Open</button>
+    <div id="gateerr"></div>
+    <p class="gfoot">Reads only public NCDOT and FHWA data. The password protects the review
+    record, not the data — every figure here is already published.</p>
+  </div>
+</div><!--GATE-END-->
+
+<div id="settings">
+  <div class="setbox">
+    <div class="sethead">
+      <h2>Settings</h2>
+      <button class="dr-x" id="set-x">&times;</button>
+    </div>
+    <div class="setbody">
+
+      <div class="setsec"><h4>Review file</h4>
+        <div class="revrow"><label>Reviewer</label><input type="text" id="reviewer" placeholder="your name"></div>
+        <div class="setbtns">
+          <button class="btn ghost" id="revsave">Save review</button>
+          <button class="btn ghost" id="revopen">Open</button>
+          <button class="btn ghost" id="revmerge">Merge</button>
+        </div>
+        <input type="file" id="revfile" accept=".json" style="display:none">
+        <p class="hint" id="revstate">Notes, statuses and cleared findings live in a file you keep. Merge combines two reviewers.</p>
+      </div>
+
+      <div class="setsec"><h4>HPMS &mdash; makes BH06-3 a real test</h4>
+        <div class="setbtns">
+          <button class="btn ghost" id="hpmsfhwa" title="Pulls only the counties the current scope needs; statewide scope pulls the state">Fetch from FHWA</button>
+          <button class="btn ghost" id="hpmsbtn">Load a file</button>
+        </div>
+        <input type="file" id="hpmsfile" accept=".csv,.txt,.tsv" style="display:none">
+        <div class="chk"><input type="checkbox" id="autohpms" checked><span class="lb">Fetch automatically on Run<em>only the counties your scope needs, and never the same county twice</em></span></div>
+      </div>
+
+      <div class="setsec"><h4>Checks</h4>
+        <div class="revrow"><label>Tolerance</label><input type="text" id="tol" value="100" style="width:70px;text-align:right"><span class="tb-lab">ft &mdash; Locate check</span></div>
+        <div class="chk"><input type="checkbox" id="autoheavy" checked><span class="lb">Run the per-structure passes<em>Locate, Resolve carried and Fill missing. Asks first on very large scopes.</em></span></div>
+        <p class="hint">Run all checks does everything. These re-run one pass on its own:</p>
+        <div class="setbtns">
+          <button class="btn ghost" id="deep" disabled>Deep check</button>
+          <button class="btn ghost" id="locate" disabled>Locate</button>
+          <button class="btn ghost" id="resolve" disabled>Resolve carried</button>
+          <button class="btn ghost" id="fillnull" disabled>Fill missing</button>
+          <button class="btn ghost" id="snbibtn" disabled>SNBI data</button>
+        </div>
+      </div>
+
+      <div class="setsec"><h4>Tools</h4>
+        <div class="setbtns">
+          <button class="btn ghost" id="ncdotcsv" disabled>NCDOT table</button>
+          <button class="btn ghost" id="diag">Diagnostics</button>
+          <!--PW-START--><button class="btn ghost" id="pwbtn">Passwords</button><!--PW-END-->
+        </div>
+        <p class="hint">Diagnostics reports which services this network can reach.</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!--ADMIN-START--><div id="admin">
+  <div class="gatebox" style="text-align:left">
+    <h2 style="margin-bottom:4px">Passwords</h2>
+    <p class="gsub2" style="margin-bottom:16px">Set either or both, then download the configured
+    copy and hand <em>that</em> file out. This file is not changed in place.</p>
+    <div class="revrow"><label>Everyone</label><input type="password" id="pw-user" placeholder="leave blank to keep"></div>
+    <div class="revrow"><label>Admin</label><input type="password" id="pw-admin" placeholder="leave blank to keep"></div>
+    <div class="revrow"><label>Confirm</label><input type="password" id="pw-conf" placeholder="repeat whichever you changed"></div>
+    <button class="btn primary" id="pw-go" style="width:100%;margin-top:8px">Apply and download configured copy</button>
+    <button class="btn ghost" id="pw-x" style="width:100%;margin-top:6px">Cancel</button>
+    <div id="pw-msg"></div>
+    <p class="gfoot">There is no recovery. If the admin password is lost, set a new one from a
+    fresh unconfigured copy and redistribute.</p>
+  </div>
+</div><!--ADMIN-END-->
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+/* ==========================================================================
+   NCDOT SNBI BH06 / BH07 Validator
+   Strinteg Corporation
+   All data is read live from NCDOT's public ArcGIS REST services. No login.
+   ========================================================================== */
+/* Pristine copy of this file, captured before anything touches the DOM, so the
+   admin can download a re-configured copy after changing a password. */
+const PRISTINE='<!DOCTYPE html>\n'+document.documentElement.outerHTML;
+
+/* ---------------------------------------------------------------- access ---
+   Passwords are stored as salted SHA-256 hashes, never in the clear. Be plain
+   about what this is: a gate that stops casual use and keeps the consequential
+   actions with the people who own them. It is NOT encryption. Anyone who opens
+   this file in a text editor can remove the gate. Every bit of data it reads is
+   already public on NCDOT's servers, so there is nothing secret to protect —
+   what it protects is the review record.
+   -------------------------------------------------------------------------- */
+/*AUTHBLK-START*/
+/*AUTH-START*/const AUTH={salt:'NCDOT-BH0607',admin:'',user:''};/*AUTH-END*/
+let ROLE='admin';                       /* until a password is configured */
+async function sha(pw){
+  const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(AUTH.salt+':'+pw));
+  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
+}
+/*AUTHBLK-END*/
+function isAdmin(){ return ROLE==='admin'; }
+function needAdmin(what){
+  if(isAdmin()) return true;
+  toast(what+' is an administrator action. Ask whoever holds the admin password.',6000);
+  return false;
+}
+
+const SVC='https://gis11.services.ncdot.gov/arcgis/rest/services';
+const BRIDGES=SVC+'/NCDOT_Bridges/MapServer/0';
+const ROADCHAR=SVC+'/NCDOT_RoadCharacteristicsQtr/MapServer/0';
+const COUNTYBDY=SVC+'/NCDOT_CountyBdy_Poly/MapServer/0';
+const STRUCT=SVC+'/NCDOT_Structures/NCDOT_DynamicStructures/MapServer';
+const GPTOOL=SVC+'/NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool';
+const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT';
+
+const CLASS={'1':{p:'I',n:'Interstate'},'2':{p:'US',n:'US Route'},'3':{p:'NC',n:'NC Route'},
+  '4':{p:'SR',n:'Secondary route'},'5':{p:'NS',n:'Non-system (municipal/private)'},
+  '6':{p:'SA',n:'Other state agency'},'7':{p:'FED',n:'Federal route'},
+  '8':{p:'RMP',n:'Ramp / rest area / non-mainline'},'9':{p:'PRJ',n:'Projected route'}};
+const QUAL={'0':'Normal','1':'ALT','2':'BYP','5':'EAST','6':'WEST','7':'CNCTR','8':'TRUCK','9':'BUS'};
+const INV={'0':'Inventory','4':'Non-inventory southbound','6':'Non-inventory westbound',
+  '8':'Inventory clockwise','9':'Non-inventory counterclockwise'};
+
+/* ---- rule set ------------------------------------------------------------
+   grp 'fhwa' = a published FHWA SNBI submittal check. These are what actually
+                fail on submission.
+   grp 'qc'   = Strinteg check. Catches values that PASS every FHWA rule and are
+                still wrong — FHWA only tests BH07 for "is it a number" and
+                "is it 8 digits or fewer", so a completely wrong milepoint is
+                submitted clean.
+   sev: e = error | w = warning | i = note                                     */
+const RULES=[
+ /* ---------------- FHWA submittal checks ---------------- */
+ {id:'BH06_1_NULL', grp:'fhwa', code:'BH06-1', sev:'e', t:'BH06 null',
+  d:'The LRS Route ID cannot be null. Required when B.F.01 (Feature Type) begins with "H" and B.F.02 (Feature Location) = "C" — a highway feature carried on the bridge.'},
+ {id:'BH06_1_LEN', grp:'fhwa', code:'BH06-1', sev:'e', t:'BH06 over 120 characters',
+  d:'The LRS Route ID must not exceed 120 characters. NCDOT\u2019s 11-digit ID clears this by 109 characters.'},
+ {id:'BH06_3_HPMS', grp:'fhwa', code:'BH06-3', sev:'e', t:'BH06 not found in HPMS',
+  d:'The reported LRS Route ID must be valid and present in the state\u2019s HPMS submittal to FHWA. Load your HPMS route list to test this for real — until you do, this tool can only flag which routes are at risk.'},
+ {id:'BH06_4_REDUNDANT', grp:'fhwa', code:'BH06-4', sev:'i', t:'Has an under-highway feature',
+  d:'This bridge crosses a highway, so your features dataset holds a second highway feature for the road below. BH06 is not reported for that feature at all, and BH06-4 additionally forbids it wherever B.H.18 (Crossing Bridge Number) shows the feature is carried on another bridge. Nothing to fix on this row — check the under-feature record.'},
+ {id:'HPMS_MP_OUT', grp:'qc', sev:'w', t:'BH07 outside the HPMS extent',
+  d:'The route is in HPMS but the milepoint falls outside the begin/end points HPMS holds for it. The route ID passes BH06-3 while the milepoint sits off the end of what the state actually reported. Needs the HPMS list loaded.'},
+ {id:'BH07_1_NUM', grp:'fhwa', code:'BH07-1', sev:'e', t:'BH07 not a valid number',
+  d:'The LRS Mile Point must be a valid numeric value. Null or non-numeric fails.'},
+ {id:'BH07_2_LEN', grp:'fhwa', code:'BH07-2', sev:'e', t:'BH07 over 8 digits',
+  d:'The mile point must not exceed 8 digits, counted on the reported 3-decimal value. The longest legitimate NC value is 84.221, so this should never trip. NCDOT publishes full precision (e.g. 0.06507547 = 9 digits) — reporting that unrounded would fail.'},
+
+ /* ---------------- Strinteg QC checks ---------------- */
+ {id:'MP_BEYOND', grp:'qc', sev:'e', t:'BH07 beyond end of route',
+  d:'The milepoint is larger than the route actually is in that county. Provably wrong — most often a statewide mile marker sign number entered instead of the county LRS measure. Passes every FHWA check. Requires Deep check.'},
+ {id:'MP_OFFSET', grp:'qc', sev:'e', t:'BH07 does not land on the bridge',
+  d:'Following the reported milepoint along the route \u2014 the real road distance, not a straight line \u2014 lands more than the tolerance away from the bridge\u2019s own coordinates. The single strongest test of whether a milepoint is right. Requires Locate check.'},
+ {id:'MP_BEFORE', grp:'qc', sev:'e', t:'BH07 before start of route',
+  d:'The milepoint falls before the route\u2019s first measure in that county. Passes every FHWA check. Requires Deep check.'},
+ {id:'NON_INV', grp:'qc', sev:'w', t:'Non-inventory direction',
+  d:'Third digit is 4, 6 or 9 — a directional route. Measured against NC HPMS 2024 these fail BH06-3 only 4.1% of the time, so this is a weak predictor, not a red flag. Kept because a directional ID is still worth an eye when the inventory direction would do.'},
+ {id:'NON_SYS', grp:'qc', sev:'w', t:'Non-system route (class 5)',
+  d:'Municipal or private route. HPMS does carry these — measured against NC HPMS 2024 they fail BH06-3 only 6.0% of the time, about the statewide baseline. Informational rather than alarming.'},
+ {id:'CNTY_MISMATCH', grp:'qc', sev:'w', t:'County code mismatch',
+  d:'The last three digits of BH06 do not match the bridge\u2019s county. Legitimate within a few hundred feet of a county line — otherwise a coding error.'},
+ {id:'CONCURRENCY', grp:'qc', sev:'w', t:'BH06 not a carried route',
+  d:'The route decoded from BH06 is not among the routes named in Feature Carried. Run Resolve carried to triage: either the carried route is right there and BH06 is wrong, or the coded route is there and the description is simply out of date after a redesignation. Ramp-carried bridges coded to a ramp route are excluded — those are correct.'},
+ {id:'BAD_FORMAT', grp:'qc', sev:'w', t:'BH06 not an 11-digit ID',
+  d:'Passes FHWA\u2019s length rule, but is not NCDOT\u2019s 11-digit format: class, qualifier, inventory, 5-digit number, 3-digit county. It will almost certainly fail the HPMS match.'},
+ {id:'MP_ZERO', grp:'qc', sev:'w', t:'BH07 exactly 0.000',
+  d:'Exact zero is often an unset default rather than a measured value. Valid only at a county line.'},
+ {id:'ROUTE_NOT_FOUND', grp:'qc', sev:'e', t:'BH06 route does not exist',
+  d:'The route ID is well formed but NCDOT\u2019s road network holds no such route. A typo, a retired route, or a county suffix that does not go with that route number. It will fail the HPMS match. Requires Deep check.'},
+ {id:'DUPLICATE_PAIR', grp:'qc', sev:'w', t:'Duplicate BH06 + BH07',
+  d:'Another bridge reports the identical route ID and milepoint at three decimals. Two structures cannot occupy the same point on the same route — usually a copy-paste, or a value carried over from the previous bridge. Compared on the reported 3-decimal value, so near-identical source values that collapse to the same reported number are caught too.'},
+
+ {id:'RAMP', grp:'note', sev:'i', t:'Ramp or non-mainline',
+  d:'Class 8. HPMS carries no ramps at all — measured against NC HPMS 2024, 721 of 721 ramp-carried bridges fail BH06-3. Nothing you can fix by correcting the ID; it needs a reporting decision from FHWA or the state. Confirm at least that the bridge really carries a ramp and is not a mainline coded to one.'},
+ {id:'PRECISION', grp:'note', sev:'i', t:'Low-precision milepoint',
+  d:'The published value carries fewer than three decimals, which usually means it was rounded or hand-entered rather than measured. BH07 is reported to three decimals — pad with zeros, but confirm the value first.'}
+];
+const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
+const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
+const SEVNAME={e:'Error',w:'Warning',i:'Note',ok:'Clean'};
+
+/* ---------- state ---------- */
+let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN={}, DEEP=false;
+let REVIEW=new Map(), REVDIRTY=false, REVIEWER='';
+let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
+let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
+
+/* ---------- helpers ---------- */
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function toast(m,ms){const t=$('toast');t.textContent=m;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),ms||3200);}
+function busy(on,msg,sub,pct){$('busy').classList.toggle('on',!!on);if(msg)$('busy-m').textContent=msg;
+  $('busy-s').textContent=sub||'';$('busy-i').style.width=(pct==null?0:pct)+'%';}
+/* BH07 is reported to three decimals, so three decimals is the value the tool
+   validates, compares, displays and exports. Everything downstream uses mp3(). */
+function mp3(v){
+  if(v===null||v===undefined||v==='') return null;
+  const n=Number(v);
+  return isFinite(n)? Math.round(n*1000)/1000 : null;
+}
+function fmtMP(v){const n=mp3(v); return n===null?'':n.toFixed(3);}
+
+async function esriQuery(url,params,post){
+  const body=new URLSearchParams(Object.assign({f:'json'},params));
+  const res=post? await fetch(url+'/query',{method:'POST',body})
+                : await fetch(url+'/query?'+body.toString());
+  if(!res.ok) throw new Error('HTTP '+res.status);
+  const j=await res.json();
+  if(j.error) throw new Error(j.error.message||'service error');
+  return j;
+}
+
+/* page every record out of a layer */
+async function queryAll(url,where,fields,onProgress){
+  let out=[],offset=0;const page=2000;
+  for(;;){
+    const j=await esriQuery(url,{where,outFields:fields,returnGeometry:'false',
+      orderByFields:'OBJECTID',resultOffset:offset,resultRecordCount:page});
+    const f=j.features||[];
+    out=out.concat(f.map(x=>x.attributes));
+    if(onProgress) onProgress(out.length);
+    if(f.length<page) break;
+    offset+=page;
+  }
+  return out;
+}
+
+/* ---------- route id decoding ---------- */
+function decodeRID(rid){
+  if(!rid||rid==='NA'||rid.length!==11||!/^\d{11}$/.test(rid)) return null;
+  const c=CLASS[rid[0]]||{p:'?',n:'Unknown class'};
+  return {cls:rid[0],clsName:c.n,prefix:c.p,qual:rid[1],qualName:QUAL[rid[1]]||'—',
+    inv:rid[2],invName:INV[rid[2]]||'Non-inventory',num:parseInt(rid.slice(3,8),10),
+    cnty:rid.slice(8),cntyName:CODE2CNTY[rid.slice(8)]||'—',
+    label:c.p+parseInt(rid.slice(3,8),10)};
+}
+/* route tokens named in the Feature Carried string */
+function carriedTokens(s){
+  if(!s) return [];
+  const m=String(s).toUpperCase().match(/\b(?:I|US|NC|SR)[\s-]?\d+/g)||[];
+  return [...new Set(m.map(x=>x.replace(/[\s-]/g,'')))];
+}
+
+/* ---------- validation engine ---------- */
+function validate(b){
+  const flags=[], rid=(b.RTE_ID||'').trim(), mp=b.MP;
+  const d=decodeRID(rid);
+
+  /* --- BH06-1 : null, and 120-character limit --- */
+  if(!rid||rid==='NA') flags.push('BH06_1_NULL');
+  else{
+    if(rid.length>120) flags.push('BH06_1_LEN');
+
+    /* --- BH06-3 : must exist in the state's HPMS submittal --- */
+    if(HPMS.size){ if(!HPMS.has(rid)) flags.push('BH06_3_HPMS'); }
+
+    /* --- Strinteg QC on the route ID --- */
+    if(!/^\d{11}$/.test(rid)) flags.push('BAD_FORMAT');
+    else{
+      if(['4','6','9'].includes(rid[2])) flags.push('NON_INV');
+      if(rid[0]==='5') flags.push('NON_SYS');
+      if(rid[0]==='8') flags.push('RAMP');
+      const myCode=COUNTIES[b.COUNTY];
+      if(myCode&&rid.slice(8)!==myCode) flags.push('CNTY_MISMATCH');
+      const toks=carriedTokens(b.F_CARRIED);
+      /* A bridge whose carried description says RAMP/CONNECTOR/COLLECTOR and whose
+         BH06 is a class-8 ramp route is coded correctly — the description names the
+         mainline the ramp serves, not the ramp itself. Not a mismatch. */
+      const rampOK = rid[0]==='8' && /RAMP|RMP|CONN|COL\b|LOOP/i.test(b.F_CARRIED||'');
+      if(d&&toks.length&&!toks.includes(d.label)&&!rampOK) flags.push('CONCURRENCY');
+    }
+  }
+
+  /* --- BH06-4 : do not report BH06 for a highway feature carried on another
+         bridge. Applies to the under-feature record, so we flag the bridges
+         where such a record exists. --- */
+  if(carriedTokens(b.FTR_INTRSC).length||/\b(HWY|HIGHWAY|RAMP|INTERSTATE|BL\b)/i.test(b.FTR_INTRSC||''))
+    flags.push('BH06_4_REDUNDANT');
+
+  /* --- BH07-1 : must be a valid numeric value --- */
+  const n=mp3(mp);                       /* the value that will actually be reported */
+  b._mp3=n;
+  if(n===null) flags.push('BH07_1_NUM');
+  else{
+    /* --- BH07-2 : 8 digits maximum, measured on the reported 3-decimal value --- */
+    if(n.toFixed(3).replace(/[^0-9]/g,'').length>8) flags.push('BH07_2_LEN');
+
+    /* --- Strinteg QC on the milepoint --- */
+    if(n===0) flags.push('MP_ZERO');
+    else{
+      /* precision is judged on the SOURCE value, not the rounded one — a source
+         carrying fewer than 3 decimals was rounded or typed, not measured */
+      const s=String(mp), dec=s.includes('.')?s.split('.')[1].length:0;
+      if(dec<3) flags.push('PRECISION');
+    }
+    const rl=ROUTELEN[rid];
+    if(rl){
+      if(n>rl.max+0.01) flags.push('MP_BEYOND');
+      else if(n<rl.min-0.01) flags.push('MP_BEFORE');
+    }
+    if(DUPES.has(rid+'@'+n.toFixed(3))) flags.push('DUPLICATE_PAIR');
+    if(b._off!=null&&b._off>TOLFT) flags.push('MP_OFFSET');
+    const hx=HPMS.get?HPMS.get(rid):null;
+    if(hx&&hx.mn!=null&&hx.mx!=null&&!(n>=hx.mn-0.02&&n<=hx.mx+0.02)) flags.push('HPMS_MP_OUT');
+  }
+
+  /* --- route exists at all? only knowable once Deep check has run --- */
+  if(/^\d{11}$/.test(rid)&&ROUTEASKED.has(rid)&&!ROUTELEN[rid]) flags.push('ROUTE_NOT_FOUND');
+
+  const sev=flags.some(f=>RULEMAP[f].sev==='e')?'e'
+           :flags.some(f=>RULEMAP[f].sev==='w')?'w'
+           :flags.some(f=>RULEMAP[f].sev==='i')?'i':'ok';
+  b._flags=flags; b._sev=sev; b._dec=d;
+  b._fhwa=flags.filter(f=>RULEMAP[f].grp==='fhwa'&&RULEMAP[f].sev==='e').length;
+  return b;
+}
+function revalidate(){
+  /* pre-pass: any route+milepoint pair claimed by more than one bridge */
+  const seen=new Map(); DUPES=new Set();
+  ALL.forEach(b=>{const r=(b.RTE_ID||'').trim(); const n=mp3(b.MP);
+    if(!r||r==='NA'||n===null) return;
+    const k=r+'@'+n.toFixed(3); seen.set(k,(seen.get(k)||0)+1);});
+  seen.forEach((v,k)=>{if(v>1) DUPES.add(k);});
+  ALL.forEach(validate);
+}
+
+/* ==========================================================================
+   MAP
+   ========================================================================== */
+const BASE={
+ street:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}','Esri'],
+ gray:['https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}','Esri'],
+ topo:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}','Esri'],
+ imagery:['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}','Esri']
+};
+if(typeof L==='undefined'){
+  document.getElementById('map').innerHTML=
+    '<div style="padding:38px;max-width:640px;font-size:13.5px;line-height:1.6">'+
+    '<div style="font-family:var(--font-h);font-size:14px;letter-spacing:.16em;text-transform:uppercase;'+
+    'color:#CF3910;border-bottom:2px solid #CF3910;padding-bottom:6px;margin-bottom:12px">Map library blocked</div>'+
+    'This copy loads its mapping library from a CDN and your network blocked it, so the map cannot draw. '+
+    'The table and every check still work.<br><br>'+
+    '<b>Use the self-contained build instead</b> — <span class="mono">NCDOT_BH06_BH07_Validator.html</span> — '+
+    'which carries the mapping library inside the file and needs no CDN.</div>';
+  throw new Error('Leaflet unavailable');
+}
+const map=L.map('map',{preferCanvas:true,zoomControl:true}).setView([35.55,-79.4],7);
+let tileFails=0, tilesDead=false;
+function makeBase(key){
+  const t=L.tileLayer(BASE[key][0],{maxZoom:19,attribution:'Tiles &copy; Esri &middot; Data: NCDOT'});
+  t.on('tileerror',()=>{
+    if(tilesDead) return;
+    if(++tileFails>=6){ tilesDead=true; goTileless(); }
+  });
+  return t;
+}
+function goTileless(){
+  /* No tile server. Draw the state instead so the map is still readable: filled
+     counties, no background imagery. Everything else keeps working. */
+  try{ map.removeLayer(baseLayer); }catch(e){}
+  document.getElementById('map').style.background='#EDEDE7';
+  if(countyLayer) countyLayer.setStyle({color:'#8C8C86',weight:1,fill:true,
+    fillColor:'#F7F7F3',fillOpacity:1,opacity:.9});
+  $('f-base').disabled=true;
+  const n=$('tilenote'); if(n) n.style.display='block';
+  toast('Your network blocked the background map tiles, so the map is drawing county outlines only. '+
+    'Bridges, checks and everything else are unaffected. Ask IT to allow server.arcgisonline.com if you want imagery.',11000);
+}
+let baseLayer=makeBase('street').addTo(map);
+const ptLayer=L.layerGroup().addTo(map);
+const routeLayer=L.layerGroup().addTo(map);
+const labelLayer=L.layerGroup();
+let countyLayer=null;
+const canvas=L.canvas({padding:0.5});
+
+const pinCtl=L.control({position:'topright'});
+pinCtl.onAdd=function(){
+  const d=L.DomUtil.create('div','leaflet-bar pinctl');
+  d.innerHTML='<button id="pin" type="button" title="Click anywhere on the map to read the LRS route and milepoint there">'+
+    '<span class="pindot"></span>Pin drop</button>';
+  L.DomEvent.disableClickPropagation(d);
+  return d;
+};
+pinCtl.addTo(map);
+
+const legend=L.control({position:'bottomright'});
+legend.onAdd=function(){const d=L.DomUtil.create('div','maplegend');
+  d.innerHTML='<b>BH06 / BH07 status</b>'+
+   ['e','w','i','ok'].map(s=>'<span><i class="sw" style="background:'+SEVCOL[s]+'"></i>'+SEVNAME[s]+'</span>').join('');
+  return d;};
+legend.addTo(map);
+
+async function loadCounties(){
+  try{
+    const r=await fetch(COUNTYBDY+'/query?'+new URLSearchParams({
+      where:'1=1',outFields:'CountyName,SapCountyId,FIPS,DOTDivisionID',returnGeometry:'true',
+      outSR:'4326',maxAllowableOffset:'0.002',f:'geojson'}));
+    const gj=await r.json();
+    gj.features.forEach(f=>{
+      const p=f.properties, nm=(p.CountyName||'').toUpperCase();
+      COUNTIES[nm]=p.SapCountyId; CODE2CNTY[p.SapCountyId]=p.CountyName;
+      if(p.FIPS!=null) SAP2FIPS[p.SapCountyId]=Number(p.FIPS);   /* HPMS keys on FIPS, NCDOT on SAP */
+    });
+    countyLayer=L.geoJSON(gj,{style: tilesDead
+      ? {color:'#8C8C86',weight:1,fill:true,fillColor:'#F7F7F3',fillOpacity:1,opacity:.9}
+      : {color:'#1A1A1A',weight:1,fill:false,opacity:.55,interactive:false}}).addTo(map);
+    gj.features.forEach(f=>{
+      const c=L.geoJSON(f).getBounds().getCenter();
+      labelLayer.addLayer(L.marker(c,{interactive:false,icon:L.divIcon({className:'',
+        html:'<div style="font-family:Oswald,sans-serif;font-size:10px;letter-spacing:.1em;'+
+        'text-transform:uppercase;color:#1A1A1A;text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 3px #fff;'+
+        'white-space:nowrap;transform:translate(-50%,-50%)">'+esc(f.properties.CountyName)+'</div>'})}));
+    });
+    const sel=$('f-county');
+    Object.keys(COUNTIES).sort().forEach(n=>sel.add(new Option(n,n)));
+    buildArg();
+  }catch(e){ toast('Could not load county boundaries: '+e.message,6000); }
+}
+
+function drawPoints(){
+  ptLayer.clearLayers();
+  const pts=VIEW.filter(b=>b.LAT_DD&&b.LONG_DD);
+  const big=pts.length>4000;
+  pts.forEach(b=>{
+    const m=L.circleMarker([b.LAT_DD,b.LONG_DD],{renderer:canvas,
+      radius: (b._esev||b._sev)==='ok'? (big?2.6:4) : (big?3.4:5.6),
+      color:'#fff', weight: big?0.6:1.2,
+      fillColor:SEVCOL[b._esev||b._sev], fillOpacity:(b._esev||b._sev)==='ok'?.75:.95});
+    m.on('click',()=>select(b.BRDG_NBR,false));
+    m.bindTooltip(b.BRDG_NBR+' — '+(b.RTE_ID||'no route')+' @ '+fmtMP(b.MP),{sticky:true});
+    m._bn=b.BRDG_NBR;
+    ptLayer.addLayer(m);
+  });
+  if(pts.length){
+    try{ map.invalidateSize({animate:false});
+         map.fitBounds(L.latLngBounds(pts.map(b=>[b.LAT_DD,b.LONG_DD])),{padding:[26,26],maxZoom:15}); }catch(e){}
+  }
+}
+
+async function drawRoute(rid){
+  routeLayer.clearLayers();
+  if(!rid||!$('l-route').checked) return;
+  try{
+    const r=await fetch(ROADCHAR+'/query?'+new URLSearchParams({
+      where:"RouteID='"+rid+"'",outFields:'RouteID',returnGeometry:'true',outSR:'4326',
+      maxAllowableOffset:'0.0001',f:'geojson'}));
+    const gj=await r.json();
+    routeLayer.addLayer(L.geoJSON(gj,{style:{color:'#CF3910',weight:4,opacity:.75,interactive:false}}));
+  }catch(e){}
+}
+
+/* ==========================================================================
+   QUERY
+   ========================================================================== */
+function buildArg(){
+  const m=$('mode').value, w=$('argwrap');
+  if(m==='bridge') w.innerHTML='<input type="text" id="arg" placeholder="Bridge number e.g. 590015">';
+  else if(m==='route') w.innerHTML='<input type="text" id="arg" placeholder="I-40, US74, or 20000074060">'+
+      ' <select id="arg2"><option value="">All counties</option>'+
+      Object.keys(COUNTIES).sort().map(n=>'<option value="'+COUNTIES[n]+'">'+n+'</option>').join('')+'</select>';
+  else if(m==='county') w.innerHTML='<select id="arg">'+
+      Object.keys(COUNTIES).sort().map(n=>'<option'+(n==='MECKLENBURG'?' selected':'')+'>'+n+'</option>').join('')+'</select>';
+  else w.innerHTML='<span style="font-size:11.5px;color:#5A5A5A">23,000+ bridges &middot; about a minute</span>';
+  const hints={bridge:'One bridge, fully decoded and checked.',
+    route:'Every bridge whose BH06 is that route. Text like "I-40" matches the route number across all counties.',
+    county:'Every bridge in the county. County is the natural unit — LRS mileposts are county-scoped.',
+    all:'Every bridge in the state. Use Deep check afterward to catch milepoints beyond the end of their route.'};
+  $('scopehint').textContent=hints[m];
+}
+
+function buildWhere(){
+  const m=$('mode').value;
+  if(m==='bridge'){
+    const v=($('arg').value||'').trim();
+    if(!v) throw new Error('Enter a bridge number.');
+    return "BRDG_NBR LIKE '%"+v.replace(/'/g,"''")+"%'";
+  }
+  if(m==='route'){
+    let v=($('arg').value||'').trim().toUpperCase().replace(/[\s-]/g,'');
+    const c=$('arg2').value;
+    if(!v) throw new Error('Enter a route.');
+    if(/^\d{11}$/.test(v)) return "RTE_ID='"+v+"'";
+    const mm=v.match(/^(I|US|NC|SR|NS|RMP)?0*(\d+)$/);
+    if(!mm) throw new Error('Route not recognised. Try I-40, US74, SR1300 or an 11-digit ID.');
+    const clsKey=Object.keys(CLASS).find(k=>CLASS[k].p===(mm[1]||''));
+    const num=mm[2].padStart(5,'0');
+    let w="RTE_ID LIKE '"+(clsKey||'_')+"__"+num+(c||'___')+"'";
+    return w;
+  }
+  if(m==='county') return "COUNTY='"+$('arg').value.replace(/'/g,"''")+"'";
+  return '1=1';
+}
+
+/* ==========================================================================
+   RUN ALL CHECKS — one button, one pipeline
+   ========================================================================== */
+async function runAll(){
+  await run();
+  if(!ALL.length) return;
+  const n=ALL.length;
+  try{
+    await loadSNBI();
+    if($('autohpms').checked){
+      const want = $('mode').value==='all' ? null : neededFips();
+      const missing = want ? want.filter(c=>!HPMSGOT.has(c)) : null;
+      if(!want || missing.length) await fetchHPMS(want);
+    }
+    await deepCheck();
+    if($('autoheavy').checked){
+      const heavy = n>2500
+        ? confirm(n.toLocaleString()+' structures. The per-structure passes (Locate, Resolve carried, '+
+                  'Fill missing) query the road network one structure at a time and will take a while.\n\n'+
+                  'Run them now?')
+        : true;
+      if(heavy){
+        await locateCheck();
+        await resolveCarried();
+        await deriveMissing();
+      }
+    }
+  }catch(e){ busy(false); toast('A check did not finish: '+(e.message||e)+' — the rest of the results are still valid.',8000); }
+  busy(false);
+  const c={e:0,w:0,i:0,ok:0}; ALL.forEach(b=>c[b._esev||b._sev]++);
+  toast('All checks complete on '+n.toLocaleString()+' structures — '+
+    c.e.toLocaleString()+' error, '+c.w.toLocaleString()+' warning, '+c.ok.toLocaleString()+' clean. '+
+    'Use the checklist to filter, then export.',11000);
+}
+
+async function run(){
+  let where;
+  try{ where=buildWhere(); }catch(e){ toast(e.message,4200); return; }
+  busy(true,'Loading bridges','contacting NCDOT',4);
+  try{
+    ALL=await queryAll(BRIDGES,where,BFIELDS,n=>busy(true,'Loading bridges',n.toLocaleString()+' records',Math.min(92,n/230)));
+    ROUTELEN={}; DEEP=false; LOCATED=false; ALL.forEach(b=>{b._off=null;b._fix=null;b._derived=null;b._snbi=SNBI.get(String(b.BRDG_NBR).trim())||null;});
+    revalidate();
+    populateFilters();
+    activeChecks.clear();
+    applyFilters();
+    busy(false);
+    $('deep').disabled=ALL.length===0;
+    $('locate').disabled=ALL.length===0;
+    $('resolve').disabled=ALL.length===0;
+    $('snbibtn').disabled=ALL.length===0;
+    $('fillnull').disabled=ALL.length===0;
+    $('csv').disabled=ALL.length===0;
+    if(!ALL.length) toast('Nothing matched that query.',4000);
+  }catch(e){ busy(false); toast('Query failed: '+e.message,6000); }
+}
+
+/* ---- deep check: true route extents, so we can catch impossible milepoints ---- */
+async function deepCheck(){
+  const ids=[...new Set(ALL.map(b=>b.RTE_ID).filter(r=>r&&/^\d{11}$/.test(r)&&!ROUTELEN[r]))];
+  if(!ids.length){ toast('Nothing further to look up.',3000); return; }
+  busy(true,'Deep check','measuring '+ids.length.toLocaleString()+' routes',2);
+  const CH=140; let done=0, fail=0;
+  for(let i=0;i<ids.length;i+=CH){
+    const chunk=ids.slice(i,i+CH);
+    try{
+      const j=await esriQuery(ROADCHAR,{
+        where:"RouteID IN ("+chunk.map(x=>"'"+x+"'").join(',')+")",
+        groupByFieldsForStatistics:'RouteID',
+        outStatistics:JSON.stringify([
+          {statisticType:'max',onStatisticField:'EndMp1',outStatisticFieldName:'mx'},
+          {statisticType:'min',onStatisticField:'BeginMp1',outStatisticFieldName:'mn'}]),
+        returnGeometry:'false'},true);
+      (j.features||[]).forEach(f=>{ROUTELEN[f.attributes.RouteID]={max:f.attributes.mx,min:f.attributes.mn};});
+      chunk.forEach(id=>ROUTEASKED.add(id));
+    }catch(e){ fail++; }
+    done+=chunk.length;
+    busy(true,'Deep check',done.toLocaleString()+' / '+ids.length.toLocaleString()+' routes',done/ids.length*100);
+  }
+  DEEP=true; revalidate(); applyFilters(); busy(false);
+  const nb=ALL.filter(b=>b._flags.includes('MP_BEYOND')||b._flags.includes('MP_BEFORE')).length;
+  toast('Deep check complete. '+nb.toLocaleString()+' milepoint'+(nb===1?'':'s')+' fall outside the route’s real extent.'+(fail?' ('+fail+' lookups failed)':''),7000);
+}
+
+/* ==========================================================================
+   REVIEW LAYER — notes, status and cleared findings, per bridge
+   Held in memory and saved to a review file you keep, share and merge. No
+   browser storage is used, so nothing is silently lost in a profile wipe and
+   two people can work the same county and combine their files afterwards.
+   ========================================================================== */
+const RSTATUS=[['','Not reviewed'],['open','Open'],['progress','In progress'],
+  ['fixed','Fixed at source'],['notissue','Not an issue'],['accepted','Accepted as-is']];
+const RSCOL={open:'#CF3910',progress:'#C9A227',fixed:'#2E7D32',notissue:'#1E56B3',accepted:'#5A5A5A'};
+function rec(bn,make){
+  let r=REVIEW.get(bn);
+  if(!r&&make){ r={status:'',note:'',by:'',ts:0,fix06:'',fix07:'',cleared:{}}; REVIEW.set(bn,r); }
+  return r;
+}
+function touch(bn){
+  const r=rec(bn,true); r.by=REVIEWER||r.by||''; r.ts=Date.now();
+  REVDIRTY=true; $('revdot').style.display='inline-block';
+}
+function isCleared(bn,rule){ const r=REVIEW.get(bn); return !!(r&&r.cleared&&r.cleared[rule]); }
+function effFlags(b){ return b._flags.filter(f=>!isCleared(b.BRDG_NBR,f)); }
+function effSev(b){
+  const f=effFlags(b);
+  return f.some(x=>RULEMAP[x].sev==='e')?'e':f.some(x=>RULEMAP[x].sev==='w')?'w'
+        :f.some(x=>RULEMAP[x].sev==='i')?'i':'ok';
+}
+function clearFinding(bn,rule,reason){
+  if(!needAdmin('Clearing a finding')) return;
+  const r=rec(bn,true);
+  r.cleared[rule]={reason:reason||'',by:REVIEWER||'',ts:Date.now()};
+  touch(bn); applyFilters();
+  const b=ALL.find(x=>x.BRDG_NBR===bn); if(b) drawDetail(b);
+}
+function unclearFinding(bn,rule){
+  if(!needAdmin('Restoring a finding')) return;
+  const r=REVIEW.get(bn); if(!r) return;
+  delete r.cleared[rule]; touch(bn); applyFilters();
+  const b=ALL.find(x=>x.BRDG_NBR===bn); if(b) drawDetail(b);
+}
+function reviewCounts(){
+  let noted=0, cleared=0, done=0;
+  REVIEW.forEach(r=>{ if(r.note||r.status) noted++;
+    cleared+=Object.keys(r.cleared||{}).length;
+    if(['fixed','notissue','accepted'].includes(r.status)) done++; });
+  return {noted,cleared,done,bridges:REVIEW.size};
+}
+function saveReview(){
+  const out={tool:'NCDOT BH06/BH07 Validator',kind:'review-file',version:1,
+    savedAt:new Date().toISOString(),savedBy:REVIEWER||'',entries:{}};
+  REVIEW.forEach((v,k)=>{ if(v.status||v.note||v.fix06||v.fix07||Object.keys(v.cleared||{}).length) out.entries[k]=v; });
+  const n=Object.keys(out.entries).length;
+  if(!n){ toast('Nothing to save yet — add a note, set a status, or clear a finding first.',5000); return; }
+  const blob=new Blob([JSON.stringify(out,null,1)],{type:'application/json'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download='BH06_BH07_review_'+(REVIEWER?REVIEWER.replace(/\W+/g,'_')+'_':'')+
+    new Date().toISOString().slice(0,10)+'.json';
+  a.style.display='none'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},400);
+  REVDIRTY=false; $('revdot').style.display='none';
+  toast('Review file saved — '+n.toLocaleString()+' structures. Keep it beside the tool; open it again to carry on.',7000);
+}
+function openReview(text,merge){
+  let j; try{ j=JSON.parse(text); }catch(e){ toast('That is not a review file.',4500); return; }
+  const e=j.entries||j;
+  if(typeof e!=='object'){ toast('That review file is empty or malformed.',4500); return; }
+  if(!merge) REVIEW=new Map();
+  let added=0, merged=0, conflicts=0;
+  Object.entries(e).forEach(([bn,v])=>{
+    const cur=REVIEW.get(bn);
+    if(!cur){ REVIEW.set(bn,v); added++; return; }
+    merged++;
+    /* newest wins per field; cleared findings are unioned so nothing is lost */
+    if((v.ts||0)>(cur.ts||0)){
+      if(v.status&&cur.status&&v.status!==cur.status) conflicts++;
+      cur.status=v.status||cur.status;
+      cur.note=v.note?(cur.note&&cur.note!==v.note?cur.note+'\n---\n'+v.note:v.note):cur.note;
+      cur.fix06=v.fix06||cur.fix06; cur.fix07=v.fix07||cur.fix07;
+      cur.by=v.by||cur.by; cur.ts=v.ts;
+    } else if(v.note&&v.note!==cur.note){ cur.note=cur.note+'\n---\n'+v.note; }
+    cur.cleared=Object.assign({},v.cleared||{},cur.cleared||{});
+  });
+  applyFilters();
+  const c=reviewCounts();
+  toast((merge?'Merged':'Opened')+' review file'+(j.savedBy?' from '+j.savedBy:'')+' — '+
+    added.toLocaleString()+' new, '+merged.toLocaleString()+' already present'+
+    (conflicts?', '+conflicts+' status conflict'+(conflicts===1?'':'s')+' resolved by newest':'')+
+    '. Now tracking '+c.bridges.toLocaleString()+' structures, '+c.cleared.toLocaleString()+' cleared findings.',11000);
+}
+
+/* ==========================================================================
+   SNBI INVENTORY DATA
+   NCDOT publishes a second, much richer structures service — 60 fields covering
+   condition ratings, inspection dates, scour, posting, geometrics and materials,
+   split into eight structure types. It keys on StructureNumber, which is the
+   same as the bridge number, so it joins straight onto what we already have.
+   ========================================================================== */
+const STRUCT_LAYERS=[[0,'Bridge'],[1,'Pipe'],[2,'Culvert'],[3,'Railroad bridge'],
+                     [4,'Tunnel'],[5,'Pedestrian'],[6,'Sign'],[7,'Other']];
+const SNBI_FIELDS=['StructureNumber','DeckCondition','SuperStructureCondition','SubStructureCondition',
+ 'CulvertCondition','YearBuilt','BridgeAge','LastInspectDate','ScourCritical','FractureCritical',
+ 'PostedOpenClosed','PostedSV','PostedTTST','StructureDeficient','FunctObsolete','SufficiencyRate','PRI',
+ 'StructureLength','BridgeDeckWidth','BridgeRoadWidth','ApproachRoadWidth','FedSkew','ThroughLanesOn',
+ 'StructureTypeMain','StructureTypeMainMaterial','StructureTypeMainCon','SuperStructureType','SubStructureType',
+ 'ServiceOn','ServiceUnder','ServiceType','NHS','FunctionalClass','Owner','OwnerName','MaintResponsible',
+ 'DetourLength','ADT','AdtYear','InventoryRoute','ReplacementCost','TIP','City'];
+let SNBI=new Map();
+
+async function loadSNBI(){
+  const mode=$('mode').value;
+  let where='1=1';
+  if(mode==='county') where="County='"+$('arg').value.replace(/'/g,"''").replace(/\b(\w)(\w*)\b/g,
+      (m,a,b)=>a.toUpperCase()+b.toLowerCase())+"'";
+  busy(true,'SNBI inventory data','reading NCDOT structures service',1);
+  const map=new Map(); let n=0;
+  try{
+    for(let li=0;li<STRUCT_LAYERS.length;li++){
+      const [id,label]=STRUCT_LAYERS[li];
+      let off=0;
+      for(;;){
+        const j=await esriQuery(STRUCT+'/'+id,{where,outFields:SNBI_FIELDS.join(','),
+          returnGeometry:'false',orderByFields:'ObjectID',resultOffset:off,resultRecordCount:2000});
+        const fs=j.features||[];
+        fs.forEach(f=>{const a=f.attributes;
+          if(a.StructureNumber){ a._type=label; map.set(String(a.StructureNumber).trim(),a); n++; }});
+        if(fs.length<2000) break;
+        off+=2000;
+      }
+      busy(true,'SNBI inventory data',label+' — '+n.toLocaleString()+' structures',(li+1)/STRUCT_LAYERS.length*100);
+    }
+  }catch(e){ busy(false); toast('Could not read the structures service: '+e.message,7000); return; }
+  SNBI=map;
+  ALL.forEach(b=>{ b._snbi=SNBI.get(String(b.BRDG_NBR).trim())||null; });
+  const matched=ALL.filter(b=>b._snbi).length;
+  populateFilters(); applyFilters(); busy(false);
+  $('snbibtn').classList.add('on');
+  const types={}; ALL.forEach(b=>{const t=b._snbi?b._snbi._type:'Unclassified'; types[t]=(types[t]||0)+1;});
+  toast('SNBI inventory data joined to '+matched.toLocaleString()+' of '+ALL.length.toLocaleString()+' structures. '+
+    Object.entries(types).sort((a,b)=>b[1]-a[1]).map(([k,v])=>v.toLocaleString()+' '+k).join(', ')+
+    '. Condition ratings, inspection dates, scour, posting and geometrics are now in the bridge panel and the CSV.',13000);
+}
+const CONDNAME={'9':'Excellent','8':'Very good','7':'Good','6':'Satisfactory','5':'Fair','4':'Poor',
+  '3':'Serious','2':'Critical','1':'Imminent failure','0':'Failed','N':'Not applicable'};
+function fmtDate(v){ if(v==null||v==='') return '';
+  try{ const d=new Date(Number(v)); return isNaN(d)?String(v):d.toISOString().slice(0,10); }catch(e){ return String(v); } }
+
+/* ==========================================================================
+   HPMS STRAIGHT FROM FHWA
+   FHWA republishes each state's HPMS submittal as a public feature service, and
+   NC's route_id column is NCDOT's own 11-digit ID. So BH06-3 can be tested for
+   real without anybody having to send us a file. Paged per county because the
+   hosted service caps pagination at 32,000 rows.
+   ========================================================================== */
+const HPMSYEAR=2024;
+let HPMSGOT=new Set();               /* FIPS county ids already pulled this session */
+
+/* Which counties does the loaded scope actually need? The scope's own counties,
+   plus every county code appearing in a BH06 — a structure near a county line
+   can legitimately reference the neighbouring county's route, and we must not
+   fail it for HPMS data we simply never fetched. */
+function neededFips(){
+  const sap=new Set();
+  ALL.forEach(b=>{
+    const c=COUNTIES[b.COUNTY]; if(c) sap.add(c);
+    const r=(b.RTE_ID||'').trim(); if(/^\d{11}$/.test(r)) sap.add(r.slice(8));
+  });
+  const fips=[];
+  sap.forEach(s=>{ const f=SAP2FIPS[s]; if(f!=null) fips.push(f); });
+  return [...new Set(fips)];
+}
+const HPMSURL='https://geo.dot.gov/server/rest/services/Hosted/HPMS_FULL_NC_'+HPMSYEAR+'/FeatureServer/0';
+async function fetchHPMS(wanted){
+  const stat=JSON.stringify([{statisticType:'min',onStatisticField:'begin_point',outStatisticFieldName:'mn'},
+                             {statisticType:'max',onStatisticField:'end_point',outStatisticFieldName:'mx'}]);
+  busy(true,'HPMS from FHWA','contacting geo.dot.gov',1);
+  try{
+    let cids;
+    if(wanted&&wanted.length) cids=wanted.slice();
+    else{                                        /* whole state */
+      const c=await esriQuery(HPMSURL,{where:'1=1',groupByFieldsForStatistics:'county_id',
+        outStatistics:JSON.stringify([{statisticType:'count',onStatisticField:'objectid',outStatisticFieldName:'n'}]),
+        returnGeometry:'false',resultRecordCount:300});
+      cids=[...new Set((c.features||[]).map(f=>f.attributes.county_id).filter(x=>x!=null))].sort((a,b)=>a-b);
+    }
+    const todo=cids.filter(c=>!HPMSGOT.has(c));   /* never refetch what is already in memory */
+    if(!todo.length){
+      busy(false);
+      toast('HPMS already in memory for this scope — '+HPMS.size.toLocaleString()+' route IDs across '+
+        HPMSGOT.size+' count'+(HPMSGOT.size===1?'y':'ies')+'. Nothing refetched.',7000);
+      return;
+    }
+    for(let i=0;i<todo.length;i++){
+      let off=0;
+      for(;;){
+        const r=await esriQuery(HPMSURL,{where:'county_id='+todo[i],groupByFieldsForStatistics:'route_id',
+          outStatistics:stat,returnGeometry:'false',orderByFields:'route_id',
+          resultOffset:off,resultRecordCount:2000});
+        const fs=r.features||[];
+        fs.forEach(f=>{const a=f.attributes; if(a.route_id) HPMS.set(a.route_id,{mn:a.mn,mx:a.mx});});
+        if(fs.length<2000) break;
+        off+=2000;
+      }
+      HPMSGOT.add(todo[i]);
+      busy(true,'HPMS from FHWA','county '+(i+1)+' of '+todo.length+' — '+HPMS.size.toLocaleString()+' routes',
+        (i+1)/todo.length*100);
+    }
+    $('hpmsn').textContent=HPMS.size.toLocaleString()+' HPMS routes ('+HPMSYEAR+', '+
+      HPMSGOT.size+' count'+(HPMSGOT.size===1?'y':'ies')+')';
+    $('hpmsfhwa').classList.add('on');
+    if(ALL.length){ revalidate(); applyFilters(); }
+    busy(false);
+    const miss=ALL.filter(b=>b._flags.includes('BH06_3_HPMS')).length;
+    toast('HPMS '+HPMSYEAR+' loaded from FHWA for '+todo.length+' new count'+(todo.length===1?'y':'ies')+
+      ' — '+HPMS.size.toLocaleString()+' route IDs held. BH06-3 is a real test now'+
+      (ALL.length?': '+miss.toLocaleString()+' structure'+(miss===1?'':'s')+' reference a route that is not in HPMS.':'.'),10000);
+  }catch(e){ busy(false); toast('Could not reach FHWA HPMS: '+e.message+
+    ' — you can still load a route list from file.',8000); }
+}
+
+/* ==========================================================================
+   CARRIED-VS-UNDER RESOLVER
+   BH06 must be the route CARRIED ON the bridge. The commonest wrong answer is
+   the road underneath, because that is what a nearest-route snap returns. So
+   instead of asking "what is nearest", we ask "what is within reach" and then
+   pick the candidate that matches the bridge's own Feature Carried text, using
+   the 11-digit decode. Then we read the milepoint off that route's geometry.
+   ========================================================================== */
+function mAtPoint(paths,x,y){
+  let best=null;
+  for(const p of paths){
+    for(let i=0;i<p.length-1;i++){
+      const a=p[i], c=p[i+1];
+      const dx=c[0]-a[0], dy=c[1]-a[1], L2=dx*dx+dy*dy;
+      let t = L2>0 ? ((x-a[0])*dx+(y-a[1])*dy)/L2 : 0;
+      t=Math.max(0,Math.min(1,t));
+      const px=a[0]+t*dx, py=a[1]+t*dy;
+      const d=Math.hypot(px-x,py-y);
+      if(best===null||d<best.d){
+        const m=(a[2]!=null&&c[2]!=null)? a[2]+t*(c[2]-a[2]) : null;
+        best={d,m};
+      }
+    }
+  }
+  return best;
+}
+
+async function resolveCarried(){
+  const targets=ALL.filter(b=>b._flags.includes('CONCURRENCY')&&b.LAT_DD&&b.LONG_DD);
+  if(!targets.length){ toast('No bridges flagged "BH06 not a carried route" in this scope.',4500); return; }
+  if(targets.length>900&&!confirm(targets.length.toLocaleString()+' bridges to resolve, one spatial query each. '+
+     'Roughly '+Math.ceil(targets.length*0.55/60)+' minutes. Continue?')) return;
+
+  busy(true,'Resolving carried route','0 / '+targets.length,1);
+  let solved=0, ambiguous=0, none=0, stale=0;
+  for(let i=0;i<targets.length;i++){
+    const b=targets[i];
+    b._fix=null;
+    try{
+      const j=await esriQuery(ROADCHAR,{
+        geometry:b.LONG_DD+','+b.LAT_DD, geometryType:'esriGeometryPoint', inSR:'4326',
+        distance:'150', units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
+        outFields:'RouteID,RouteID2,RouteID3,RouteID4,RouteID5,RouteID6,RouteName,StreetName',
+        returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:400});
+      const cand=new Map();                      /* routeId -> paths that carry it */
+      (j.features||[]).forEach(f=>{
+        const a=f.attributes, paths=(f.geometry&&f.geometry.paths)||[];
+        ['RouteID','RouteID2','RouteID3','RouteID4','RouteID5','RouteID6'].forEach(k=>{
+          const r=a[k]; if(!r||!/^\d{11}$/.test(r)) return;
+          if(!cand.has(r)) cand.set(r,{paths:[],primary:false});
+          if(k==='RouteID'){ cand.get(r).primary=true; paths.forEach(pp=>cand.get(r).paths.push(pp)); }
+        });
+      });
+      const toks=carriedTokens(b.F_CARRIED);
+      const hits=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
+      const codedPresent=cand.has((b.RTE_ID||'').trim());
+
+      if(!hits.length){
+        /* The route named in Feature Carried is not at this bridge. If the route
+           actually CODED in BH06 is, the coding is probably right and the carried
+           text is stale — NC-295 became I-295, US-70 Byp became I-42, NC-147
+           became I-885. Redesignation, not a coding error. */
+        b._fix={verdict: codedPresent?'stale':'neither', rid:null, mp:null, cands:cand.size};
+        if(codedPresent) stale++; else none++;
+        continue;
+      }
+      hits.sort((x,y)=>(x[2]==='0'?0:1)-(y[2]==='0'?0:1));
+      if(hits.length>1) ambiguous++;
+      const rid=hits[0];
+      const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
+      let mp=null, offset=null;
+      const pl=cand.get(rid).paths;
+      if(pl.length){ const r=mAtPoint(pl,sp.x,sp.y); if(r&&r.m!=null){ mp=Math.round(r.m*1000)/1000; offset=r.d; } }
+      if(mp===null){
+        try{
+          const g=await esriQuery(ROADCHAR,{where:"RouteID='"+rid+"'",outFields:'RouteID',
+            returnGeometry:'true',returnM:'true',outSR:'2264',resultRecordCount:2000},true);
+          const gp=[]; (g.features||[]).forEach(f=>((f.geometry&&f.geometry.paths)||[]).forEach(pp=>gp.push(pp)));
+          const r=mAtPoint(gp,sp.x,sp.y); if(r&&r.m!=null){ mp=Math.round(r.m*1000)/1000; offset=r.d; }
+        }catch(e){}
+      }
+      if(mp===null){ b._fix={verdict:'neither',rid:null,mp:null,cands:cand.size}; none++; continue; }
+      b._fix={verdict:'fix',rid,mp,offset,alts:hits.length,cands:cand.size,codedPresent};
+      solved++;
+    }catch(e){ none++; }
+    if(i%10===0) busy(true,'Resolving carried route',(i+1)+' / '+targets.length+' — '+solved+' resolved',
+      (i+1)/targets.length*100);
+  }
+  applyFilters(); busy(false);
+  toast('Triaged '+targets.length.toLocaleString()+' flagged bridges — '+
+    solved.toLocaleString()+' resolved to the carried route'+(ambiguous?' ('+ambiguous+' ambiguous)':'')+', '+
+    stale.toLocaleString()+' where the coded route IS at the bridge so the Feature Carried text is stale, '+
+    none.toLocaleString()+' where neither route is there and a human is needed. Review before applying anything.',13000);
+}
+
+/* ==========================================================================
+   DERIVE MISSING BH06 / BH07
+   For every structure with no LRS route or no milepoint, ask the road network
+   what is within reach, prefer the candidate that matches Feature Carried, and
+   read the milepoint off that route's own geometry. Two guards matter:
+     - a nearest-route grab returns the road UNDERNEATH at a grade separation,
+       so an unmatched answer is marked low confidence, never presented as fact;
+     - signs, pipes and other non-NBI structures are reported as not requiring
+       BH06 at all rather than being given an invented one.
+   ========================================================================== */
+const NON_NBI=['Sign','Pipe','Other'];
+/* Is the feature CARRIED ON this structure a highway? BH06 only applies where it
+   is (B.F.01 begins H, B.F.02 = C). A railroad or pedestrian bridge over a road
+   carries no highway, so the road below must never become its BH06. */
+function carriedIsHighway(b){
+  const s=b._snbi;
+  if(s&&s.ServiceOn) return /highway/i.test(s.ServiceOn);
+  if(b.SERVICEON!=null&&b.SERVICEON!=='') return String(b.SERVICEON).trim()==='1';
+  const fc=(b.F_CARRIED||'');
+  if(/RAILROAD|RAILRD|\bRR\b|RAIL\b|CSX|NORFOLK|SOUTHERN R|PEDESTRIAN|GREENWAY|TRAIL|SIGN|PIPE|CONVEYOR|UTILITY/i.test(fc)) return false;
+  return true;
+}
+async function deriveMissing(){
+  const targets=ALL.filter(b=>
+    (b._flags.includes('BH06_1_NULL')||b._flags.includes('BH07_1_NUM'))&&b.LAT_DD&&b.LONG_DD);
+  if(!targets.length){ toast('No structures in this scope are missing BH06 or BH07.',4500); return; }
+  if(targets.length>600&&!confirm(targets.length.toLocaleString()+' structures to measure, one query each. '+
+     'Roughly '+Math.ceil(targets.length*0.55/60)+' minutes. Continue?')) return;
+
+  busy(true,'Deriving missing values','0 / '+targets.length,1);
+  let high=0, med=0, low=0, skipped=0, none=0;
+  for(let i=0;i<targets.length;i++){
+    const b=targets[i];
+    b._derived=null;
+
+    /* BH06 applies only where a HIGHWAY is carried on the structure. Anything
+       else is reported as not required rather than handed the road underneath. */
+    const st=b._snbi?b._snbi._type:null;
+    const nonNbi=st&&NON_NBI.includes(st);
+    const notHwy=!carriedIsHighway(b);
+    if(nonNbi||notHwy){
+      const why = nonNbi
+        ? 'Structure type is '+st+', which is not an NBI structure.'
+        : 'The feature carried on this structure is '+
+          ((b._snbi&&b._snbi.ServiceOn)?b._snbi.ServiceOn.toLowerCase():'not a highway')+
+          ', not a highway. BH06 is reported only where B.F.01 begins with H and B.F.02 = C.';
+      b._derived={verdict:'notreq',type:st||'—',why}; skipped++;
+      const r=rec(b.BRDG_NBR,true);
+      if(!r.status) r.status='notissue';
+      const line=why+' BH06/BH07 do not apply, so no value was derived. Checked automatically '+
+        new Date().toLocaleDateString()+'.';
+      if(!r.note) r.note=line;
+      r.by=REVIEWER||r.by||''; r.ts=Date.now(); REVDIRTY=true; $('revdot').style.display='inline-block';
+      continue;
+    }
+
+    try{
+      const j=await esriQuery(ROADCHAR,{
+        geometry:b.LONG_DD+','+b.LAT_DD, geometryType:'esriGeometryPoint', inSR:'4326',
+        distance:'150', units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
+        outFields:'RouteID,RouteID2,RouteID3,RouteID4,RouteID5,RouteID6,RouteName,StreetName',
+        returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:400});
+      const cand=new Map();
+      (j.features||[]).forEach(f=>{
+        const a=f.attributes, paths=(f.geometry&&f.geometry.paths)||[];
+        const primary=a.RouteID;
+        if(primary&&/^\d{11}$/.test(primary)){
+          if(!cand.has(primary)) cand.set(primary,[]);
+          paths.forEach(pp=>cand.get(primary).push(pp));
+        }
+        ['RouteID2','RouteID3','RouteID4','RouteID5','RouteID6'].forEach(k=>{
+          const r=a[k]; if(r&&/^\d{11}$/.test(r)&&!cand.has(r)) cand.set(r,[]);
+        });
+      });
+      if(!cand.size){ b._derived={verdict:'none'}; none++; continue; }
+
+      const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
+      const toks=carriedTokens(b.F_CARRIED);
+      const matched=[...cand.keys()].filter(r=>{const d=decodeRID(r); return d&&toks.includes(d.label);});
+      matched.sort((x,y)=>(x[2]==='0'?0:1)-(y[2]==='0'?0:1));
+
+      let rid=null, conf='low', how='';
+      if(matched.length){ rid=matched[0]; conf='high'; how='matched the route named in Feature Carried'; }
+      else if(!toks.length){ conf='medium'; how='Feature Carried names no route number (a local street), nearest carried route used'; }
+      else{ conf='low'; how='Feature Carried names '+toks.join('/')+' but no candidate matched — this may be the road underneath'; }
+      if(!rid){
+        /* nearest route by true perpendicular distance to its geometry */
+        let best=null;
+        cand.forEach((paths,r)=>{ if(!paths.length) return;
+          const m=mAtPoint(paths,sp.x,sp.y); if(m&&(best===null||m.d<best.d)) best={d:m.d,r}; });
+        if(best) rid=best.r;
+      }
+      if(!rid){ b._derived={verdict:'none'}; none++; continue; }
+
+      let paths=cand.get(rid);
+      if(!paths||!paths.length){
+        const g=await esriQuery(ROADCHAR,{where:"RouteID='"+rid+"'",outFields:'RouteID',
+          returnGeometry:'true',returnM:'true',outSR:'2264',resultRecordCount:2000},true);
+        paths=[]; (g.features||[]).forEach(f=>((f.geometry&&f.geometry.paths)||[]).forEach(pp=>paths.push(pp)));
+      }
+      const m=mAtPoint(paths,sp.x,sp.y);
+      if(!m||m.m==null){ b._derived={verdict:'none'}; none++; continue; }
+      const mp=Math.round(m.m*1000)/1000;
+      b._derived={verdict:'derived',rid,mp,conf,how,offset:m.d,cands:cand.size};
+      if(conf==='high') high++; else if(conf==='medium') med++; else low++;
+
+      /* write it into the review record so it exports and survives a save */
+      const r=rec(b.BRDG_NBR,true);
+      r.fix06=rid; r.fix07=mp.toFixed(3);
+      if(!r.status) r.status=conf==='high'?'progress':'open';
+      const line='Derived from NCDOT road network '+new Date().toLocaleDateString()+
+        ': BH06 '+rid+', BH07 '+mp.toFixed(3)+' ('+how+', '+m.d.toFixed(0)+' ft from the published coordinates'+
+        (conf==='high'?'':conf==='medium'?' — plausible, worth a look':' — CONFIRM BEFORE USE, this may be the road underneath')+').';
+      r.note = r.note ? (r.note.includes('Derived from NCDOT road network')? r.note : r.note+'\n'+line) : line;
+      r.by=REVIEWER||r.by||''; r.ts=Date.now();
+      REVDIRTY=true; $('revdot').style.display='inline-block';
+    }catch(e){ b._derived={verdict:'none'}; none++; }
+    if(i%5===0) busy(true,'Deriving missing values',(i+1)+' / '+targets.length+' — '+
+      (high+low)+' derived',(i+1)/targets.length*100);
+  }
+  applyFilters(); busy(false);
+  $('ncdotcsv').disabled=(high+med+low)===0;
+  toast('Of '+targets.length.toLocaleString()+' structures missing BH06/BH07: '+
+    high.toLocaleString()+' derived with high confidence, '+med.toLocaleString()+' medium, '+
+    low.toLocaleString()+' low (confirm — may be the road underneath), '+
+    skipped.toLocaleString()+' need no BH06 at all (not a highway carried on the structure)'+
+    (none?', '+none.toLocaleString()+' had no route within 150 ft':'')+
+    '. Notes are filled in. Export the NCDOT table when you are happy with it.',16000);
+}
+
+/* ---- the table NCDOT can load straight into their database ---- */
+const CONFCOL={high:'#2E7D32',medium:'#1E56B3',low:'#C9A227'};
+function exportNCDOT(){
+  const rows=ALL.filter(b=>b._derived&&b._derived.verdict==='derived');
+  const nreq=ALL.filter(b=>b._derived&&b._derived.verdict==='notreq');
+  if(!rows.length&&!nreq.length){ toast('Nothing derived yet — run Fill missing first.',4500); return; }
+  const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const out=[['BRIDGE_NUMBER','COUNTY','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','ROUTE_DECODED',
+    'FEATURE_CARRIED','FEATURE_CROSSED','STRUCTURE_TYPE','CONFIDENCE','METHOD','OFFSET_FT',
+    'LAT_DD','LONG_DD','DERIVED_BY','DERIVED_DATE','SOURCE'].join(',')];
+  rows.forEach(b=>{const d=b._derived, dec=decodeRID(d.rid);
+    out.push([b.BRDG_NBR,b.COUNTY,d.rid,d.mp.toFixed(3),dec?dec.label:'',
+      b.F_CARRIED,b.FTR_INTRSC,b._snbi?b._snbi._type:'',d.conf.toUpperCase(),d.how,d.offset.toFixed(1),
+      b.LAT_DD,b.LONG_DD,REVIEWER||'',new Date().toISOString().slice(0,10),
+      'NCDOT Road Characteristics LRS, measured along the route'].map(q).join(','));});
+  /* structures that should carry no BH06 at all — also an action for NCDOT */
+  nreq.forEach(b=>{
+    out.push([b.BRDG_NBR,b.COUNTY,'','','',b.F_CARRIED,b.FTR_INTRSC,
+      b._snbi?b._snbi._type:'','NOT REQUIRED',b._derived.why||'','', b.LAT_DD,b.LONG_DD,
+      REVIEWER||'',new Date().toISOString().slice(0,10),
+      'No highway carried on the structure — B.F.01 does not begin with H'].map(q).join(','));});
+  const blob=new Blob(['\ufeff'+out.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download='NCDOT_BH06_BH07_proposed_values_'+new Date().toISOString().slice(0,10)+'.csv';
+  a.style.display='none'; document.body.appendChild(a); a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},400);
+  const hi=rows.filter(b=>b._derived.conf==='high').length;
+  toast('Exported '+(rows.length+nreq.length).toLocaleString()+' rows for NCDOT — '+
+    rows.length.toLocaleString()+' proposed values ('+hi.toLocaleString()+' high confidence) and '+
+    nreq.length.toLocaleString()+' marked NOT REQUIRED because no highway is carried on the structure.',11000);
+}
+
+/* ==========================================================================
+   LOCATE CHECK
+   Walk the route's own geometry, which carries an M value on every vertex, to
+   the reported milepoint, then measure how far that lands from the bridge.
+   Distance is followed ALONG THE ROAD — the M values are route measures, so a
+   switchback is followed round, never cut across.
+   ========================================================================== */
+function pointAtM(paths,m){
+  /* Only interpolate where a segment genuinely brackets the measure. If nothing
+     does, the geometry we hold does not cover that milepoint and the honest
+     answer is "not measured" — snapping to the nearest vertex would manufacture
+     an offset out of a gap in the data. */
+  const EPS=0.0006;                       /* ~3 ft in miles */
+  for(const p of paths){
+    for(let i=0;i<p.length-1;i++){
+      const a=p[i], c=p[i+1], m0=a[2], m1=c[2];
+      if(m0==null||m1==null) continue;
+      const lo=Math.min(m0,m1), hi=Math.max(m0,m1);
+      if(m>=lo-EPS&&m<=hi+EPS&&hi>lo){
+        let t=(m-m0)/(m1-m0); t=Math.max(0,Math.min(1,t));
+        return [a[0]+t*(c[0]-a[0]), a[1]+t*(c[1]-a[1])];
+      }
+    }
+  }
+  return null;
+}
+
+async function locateCheck(){
+  TOLFT=Math.max(1,Number($('tol').value)||100);
+  const byRoute=new Map();
+  ALL.forEach(b=>{const r=(b.RTE_ID||'').trim();
+    if(/^\d{11}$/.test(r)&&b._mp3!==null&&b.LAT_DD&&b.LONG_DD){
+      if(!byRoute.has(r)) byRoute.set(r,[]); byRoute.get(r).push(b);}});
+  const routes=[...byRoute.keys()];
+  if(!routes.length){ toast('Nothing to locate in this scope.',3500); return; }
+  if(routes.length>1600&&!confirm(routes.length.toLocaleString()+' routes to walk. This pulls real geometry and '+
+     'will take a while — roughly '+Math.ceil(routes.length/12*1.2/60)+' minutes. Continue?')) return;
+
+  busy(true,'Locate check','walking '+routes.length.toLocaleString()+' routes',1);
+  const CH=8; let done=0, fail=0;
+  for(let i=0;i<routes.length;i+=CH){
+    const chunk=routes.slice(i,i+CH);
+    try{
+      const paths=new Map();
+      let offset=0;
+      for(;;){                                   /* page — truncated geometry gives phantom offsets */
+        const j=await esriQuery(ROADCHAR,{
+          where:"RouteID IN ("+chunk.map(x=>"'"+x+"'").join(',')+")",
+          outFields:'RouteID', returnGeometry:'true', returnM:'true',
+          outSR:'2264', orderByFields:'OBJECTID',
+          resultOffset:offset, resultRecordCount:2000},true);
+        const fs=j.features||[];
+        fs.forEach(f=>{const r=f.attributes.RouteID;
+          if(!paths.has(r)) paths.set(r,[]);
+          (f.geometry&&f.geometry.paths||[]).forEach(pp=>paths.get(r).push(pp));});
+        if(fs.length<2000||!j.exceededTransferLimit&&fs.length<2000) break;
+        if(fs.length===0) break;
+        offset+=2000;
+        if(offset>20000) break;
+      }
+      chunk.forEach(r=>{
+        const pl=paths.get(r); if(!pl||!pl.length) return;
+        byRoute.get(r).forEach(b=>{
+          const pt=pointAtM(pl,b._mp3); if(!pt) return;
+          const sp=toStatePlane(b.LAT_DD,b.LONG_DD);
+          b._off=Math.hypot(pt[0]-sp.x, pt[1]-sp.y);
+        });
+      });
+    }catch(e){ fail++; }
+    done+=chunk.length;
+    busy(true,'Locate check',done.toLocaleString()+' / '+routes.length.toLocaleString()+' routes',done/routes.length*100);
+  }
+  LOCATED=true; revalidate(); applyFilters(); busy(false);
+  const cands=ALL.filter(b=>/^\d{11}$/.test((b.RTE_ID||'').trim())&&b._mp3!==null&&b.LAT_DD);
+  const measured=cands.filter(b=>b._off!=null);
+  const unmeasured=cands.length-measured.length;
+  const off=measured.filter(b=>b._off>TOLFT).length;
+  const med=measured.length?measured.map(b=>b._off).sort((a,b)=>a-b)[Math.floor(measured.length/2)]:0;
+  toast('Locate check complete. '+measured.length.toLocaleString()+' bridges measured, median offset '+
+    med.toFixed(1)+' ft. '+off.toLocaleString()+' land more than '+TOLFT+' ft from the bridge.'+
+    (unmeasured?' '+unmeasured.toLocaleString()+' could not be measured — the route geometry does not cover that milepoint.':'')+
+    (fail?' ('+fail+' batches failed)':''),10000);
+}
+
+/* ==========================================================================
+   FILTERS / RENDER
+   ========================================================================== */
+function populateFilters(){
+  const fill=(id,vals,fmt)=>{const s=$(id),cur=s.value;s.innerHTML='<option value="">All</option>';
+    vals.forEach(v=>s.add(new Option(fmt?fmt(v):v,v)));s.value=cur;};
+  fill('f-div',[...new Set(ALL.map(b=>b.DIVISION).filter(x=>x!=null))].sort((a,b)=>a-b),v=>'Division '+v);
+  fill('f-class',Object.keys(CLASS).filter(k=>ALL.some(b=>(b.RTE_ID||'')[0]===k)),v=>CLASS[v].p+' — '+CLASS[v].n);
+  fill('f-inv',Object.keys(INV).filter(k=>ALL.some(b=>(b.RTE_ID||'')[2]===k)),v=>v+' — '+INV[v]);
+  fill('f-maint',[...new Set(ALL.map(b=>b.MAINT_RESP).filter(Boolean))].sort());
+  fill('f-stype',[...new Set(ALL.map(b=>b._snbi?b._snbi._type:null).filter(Boolean))].sort());
+  const cs=$('f-county'); if(cs.options.length<2) Object.keys(COUNTIES).sort().forEach(n=>cs.add(new Option(n,n)));
+}
+
+const GROUPS=[
+ {k:'fhwa', t:'FHWA submittal checks', s:'published SNBI rules — these fail on submission'},
+ {k:'qc',   t:'Strinteg QC — likely wrong', s:'passes FHWA, still not right'},
+ {k:'note', t:'Strinteg notes', s:'informational, nothing to fix'}
+];
+function renderChecks(){
+  const counts={}; RULES.forEach(r=>counts[r.id]=0);
+  ALL.forEach(b=>(b._eff||b._flags).forEach(f=>{if(counts[f]!==undefined)counts[f]++;}));
+  const row=r=>{
+    const n=counts[r.id], off=n===0?'opacity:.42;':'';
+    const needsDeep=['MP_BEYOND','MP_BEFORE','ROUTE_NOT_FOUND'].includes(r.id)&&!DEEP;
+    const needsLoc=(r.id==='MP_OFFSET')&&!LOCATED;
+    const needsHpms=(r.id==='BH06_3_HPMS')&&!HPMS.size;
+    const sub=needsLoc?'run Locate check':needsDeep?'run Deep check':needsHpms?'load your HPMS route list to test this':
+              esc(r.d.slice(0,72))+(r.d.length>72?'\u2026':'');
+    return '<label class="chk" style="'+off+'" title="'+esc(r.d)+'">'+
+      '<input type="checkbox" data-rule="'+r.id+'" data-grp="'+r.grp+'"'+
+      (activeChecks.has(r.id)?' checked':'')+(n?'':' disabled')+'>'+
+      '<span class="lb"><i class="sev" style="background:'+SEVCOL[r.sev]+'"></i>'+
+      (r.code?'<span class="rcode">'+r.code+'</span> ':'')+esc(r.t)+
+      '<em>'+sub+'</em></span><span class="ct">'+n.toLocaleString()+'</span></label>';};
+
+  $('checks').innerHTML=GROUPS.map(g=>{
+    const rs=RULES.filter(r=>r.grp===g.k);
+    const hit=ALL.filter(b=>(b._eff||b._flags).some(f=>RULEMAP[f]&&RULEMAP[f].grp===g.k)).length;
+    const on=rs.every(r=>counts[r.id]===0||activeChecks.has(r.id))&&rs.some(r=>counts[r.id]>0);
+    return '<div class="grp"><span>'+g.t+'</span>'+
+      '<span class="gn">'+hit.toLocaleString()+'</span>'+
+      '<button class="gsel" data-grp="'+g.k+'">'+(on?'clear':'all')+'</button></div>'+
+      '<div class="gsub">'+g.s+'</div>'+rs.map(row).join('');
+  }).join('');
+
+  $('checks').querySelectorAll('input').forEach(i=>i.onchange=()=>{
+    i.checked?activeChecks.add(i.dataset.rule):activeChecks.delete(i.dataset.rule); applyFilters();});
+  $('checks').querySelectorAll('.gsel').forEach(btn=>btn.onclick=e=>{
+    e.preventDefault();
+    const g=btn.dataset.grp, rs=RULES.filter(r=>r.grp===g&&counts[r.id]>0);
+    const turnOn=btn.textContent==='all';
+    rs.forEach(r=>turnOn?activeChecks.add(r.id):activeChecks.delete(r.id));
+    applyFilters();});
+}
+function applyFilters(){
+  const HC=$('hidecleared').checked;
+  ALL.forEach(b=>{ b._eff = HC? effFlags(b) : b._flags; b._esev = HC? effSev(b) : b._sev; });
+  const q=($('f-q').value||'').trim().toUpperCase();
+  const fc=$('f-county').value, fd=$('f-div').value, fk=$('f-class').value,
+        fi=$('f-inv').value, fm=$('f-maint').value;
+  const lo=parseFloat($('f-mpmin').value), hi=parseFloat($('f-mpmax').value);
+  VIEW=ALL.filter(b=>{
+    if(silentOnly&&!(!b._eff.some(f=>RULEMAP[f].grp==='fhwa'&&RULEMAP[f].sev==='e')&&
+        b._eff.some(f=>RULEMAP[f].grp==='qc'&&RULEMAP[f].sev==='e'))) return false;
+    if(activeChecks.size&&![...activeChecks].some(r=>b._eff.includes(r))) return false;
+    const fr=$('f-rev').value;
+    if(fr){
+      const r=REVIEW.get(b.BRDG_NBR);
+      if(fr==='__none'&&r&&(r.status||r.note)) return false;
+      if(fr==='__any'&&!(r&&(r.status||r.note))) return false;
+      if(fr==='__note'&&!(r&&r.note)) return false;
+      if(fr==='__cleared'&&!(r&&Object.keys(r.cleared||{}).length)) return false;
+      if(!['__none','__any','__note','__cleared'].includes(fr)&&(!r||r.status!==fr)) return false;
+    }
+    if(fc&&b.COUNTY!==fc) return false;
+    if(fd&&String(b.DIVISION)!==fd) return false;
+    if(fk&&(b.RTE_ID||'')[0]!==fk) return false;
+    if(fi&&(b.RTE_ID||'')[2]!==fi) return false;
+    if(fm&&b.MAINT_RESP!==fm) return false;
+    const fst=$('f-stype').value;
+    if(fst&&(!b._snbi||b._snbi._type!==fst)) return false;
+    const fcd=$('f-cond').value;
+    if(fcd){
+      if(!b._snbi) return false;
+      const cs=['DeckCondition','SuperStructureCondition','SubStructureCondition','CulvertCondition']
+        .map(k=>parseInt(b._snbi[k],10)).filter(x=>!isNaN(x));
+      if(!cs.length||Math.min(...cs)>Number(fcd)) return false;
+    }
+    if(!isNaN(lo)&&!(b._mp3!==null&&b._mp3>=lo)) return false;
+    if(!isNaN(hi)&&!(b._mp3!==null&&b._mp3<=hi)) return false;
+    if(q){
+      const hay=[b.BRDG_NBR,b.RTE_ID,b.F_CARRIED,b.FTR_INTRSC,b.COUNTY].join(' ').toUpperCase();
+      if(!hay.includes(q)) return false;
+    }
+    return true;
+  });
+  sortView(); renderChecks(); renderSummary(); renderTable(); drawPoints();
+}
+
+function renderSummary(){
+  const c={e:0,w:0,i:0,ok:0}; VIEW.forEach(b=>c[b._esev]++);
+  $('t-tot').textContent=VIEW.length.toLocaleString();
+  $('t-ok').textContent=c.ok.toLocaleString();
+  $('t-warn').textContent=c.w.toLocaleString();
+  $('t-note').textContent=c.i.toLocaleString();
+  const fh=VIEW.filter(b=>b._eff.some(f=>RULEMAP[f].grp==='fhwa'&&RULEMAP[f].sev==='e')).length;
+  const silent=VIEW.filter(b=>!b._eff.some(f=>RULEMAP[f].grp==='fhwa'&&RULEMAP[f].sev==='e')&&b._esev==='e').length;
+  $('t-fhwa').textContent=fh.toLocaleString();
+  $('t-silent').textContent=silent.toLocaleString();
+  $('sumn').textContent=VIEW.length!==ALL.length?('filtered from '+ALL.length.toLocaleString()):'';
+  const tot=VIEW.length||1;
+  const rc=reviewCounts();
+  $('revn').textContent=rc.bridges?rc.bridges.toLocaleString()+' touched':'';
+  $('revsum').textContent=rc.bridges
+    ? rc.done.toLocaleString()+' closed out, '+rc.noted.toLocaleString()+' with a status or note, '+
+      rc.cleared.toLocaleString()+' findings cleared.'+(REVDIRTY?' Unsaved changes.':'')
+    : 'Nothing reviewed yet. Open a bridge, set a status, leave a note, or clear a finding — then Save review.';
+  $('meter').innerHTML=['e','w','i','ok'].map(s=>c[s]?'<i style="background:'+SEVCOL[s]+
+    ';width:'+(c[s]/tot*100)+'%" title="'+SEVNAME[s]+': '+c[s].toLocaleString()+'"></i>':'').join('');
+  $('tcount').textContent=VIEW.length.toLocaleString()+' row'+(VIEW.length===1?'':'s');
+}
+
+const COLS=[
+ {k:'BRDG_NBR',t:'Bridge',w:''},{k:'COUNTY',t:'County'},{k:'_sevlab',t:'Status'},
+ {k:'_bh06',t:'BH06 route ID',mono:1},{k:'_declab',t:'Decoded'},
+ {k:'MP',t:'BH07 milepoint',mono:1,num:1},{k:'_off',t:'Offset ft',mono:1,num:1},{k:'F_CARRIED',t:'Carried'},
+ {k:'FTR_INTRSC',t:'Crossed'},
+ {k:'_rev',t:'Review'},{k:'_stype',t:'Structure type'},{k:'_cond',t:'Cond D/Su/Sb'},
+ {k:'_fix',t:'Suggested BH06 / BH07',mono:1},{k:'_flaglab',t:'Findings'}];
+
+function cell(b,k){
+  if(k==='_sevlab') return '<span class="badge b-'+({e:'err',w:'warn',i:'info',ok:'ok'}[b._sev])+'">'+SEVNAME[b._sev]+'</span>';
+  if(k==='_declab'){
+    if(b._dec) return esc(b._dec.label);
+    if(b._derived&&b._derived.verdict==='derived'){const d=decodeRID(b._derived.rid);
+      return '<span style="color:'+(CONFCOL[b._derived.conf]||'#C9A227')+'">'+esc(d?d.label:'')+'</span>';}
+    return '';
+  }
+  if(k==='_rev'){
+    const r=REVIEW.get(b.BRDG_NBR); if(!r) return '';
+    const lbl=(RSTATUS.find(x=>x[0]===r.status)||['',''])[1];
+    const nc=Object.keys(r.cleared||{}).length;
+    return (r.status?'<span class="badge" style="color:'+(RSCOL[r.status]||'#5A5A5A')+'">'+esc(lbl)+'</span>':'')+
+      (r.note?'<span title="'+esc(r.note.slice(0,180))+'" style="color:#1E56B3">note</span> ':'')+
+      (nc?'<span style="color:#5A5A5A">'+nc+' cleared</span>':'');
+  }
+  if(k==='_bh06'){
+    const v=(b.RTE_ID||'').trim();
+    if(v&&v!=='NA') return esc(v);
+    if(b._derived&&b._derived.verdict==='derived')
+      return '<span style="color:'+(CONFCOL[b._derived.conf]||'#C9A227')+'" title="derived, '+
+        esc(b._derived.how)+'">'+esc(b._derived.rid)+'&nbsp;&#9670;</span>';
+    if(b._derived&&b._derived.verdict==='notreq')
+      return '<span style="color:#1E56B3">not required</span>';
+    return esc(v);
+  }
+  if(k==='_stype') return b._snbi?esc(b._snbi._type):'';
+  if(k==='_cond'){ if(!b._snbi) return '';
+    const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(x=>b._snbi[x]==null?'-':b._snbi[x]);
+    const mn=Math.min(...v.map(x=>parseInt(x,10)).filter(x=>!isNaN(x)));
+    const col=mn<=3?'#CF3910':mn<=4?'#C9A227':'#5A5A5A';
+    return '<span style="color:'+col+'">'+v.join(' / ')+'</span>'; }
+  if(k==='_fix'){
+    if(!b._fix) return '';
+    if(b._fix.verdict==='fix') return '<span style="color:#2E7D32">'+esc(b._fix.rid)+' @ '+b._fix.mp.toFixed(3)+
+      '</span>'+(b._fix.alts>1?' <span style="color:#C9A227">('+b._fix.alts+')</span>':'');
+    if(b._fix.verdict==='stale') return '<span style="color:#1E56B3">coded route is here — text stale</span>';
+    return '<span style="color:#C9A227">needs a human</span>';
+  }
+  if(k==='_flaglab') return b._flags.map(f=>{
+    const cl=isCleared(b.BRDG_NBR,f);
+    return '<span class="badge b-'+({e:'err',w:'warn',i:'info'}[RULEMAP[f].sev])+'"'+
+      (cl?' style="opacity:.4;text-decoration:line-through"':'')+'>'+esc(RULEMAP[f].t)+'</span>';}).join('');
+  if(k==='MP'){
+    const v=fmtMP(b.MP);
+    if(v) return v;
+    if(b._derived&&b._derived.verdict==='derived')
+      return '<span style="color:'+(CONFCOL[b._derived.conf]||'#C9A227')+'">'+
+        b._derived.mp.toFixed(3)+'</span>';
+    return '';
+  }
+  if(k==='_off') return b._off==null?'':('<span style="color:'+(b._off>TOLFT?'#CF3910':'#5A5A5A')+'">'+
+    (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+'</span>');
+  return esc(b[k]);
+}
+function sortView(){
+  VIEW.sort((a,b)=>{
+    let x,y;
+    if(sortKey==='_sevlab'){const o={e:0,w:1,i:2,ok:3};x=o[a._sev];y=o[b._sev];}
+    else if(sortKey==='_flaglab'){x=a._flags.length;y=b._flags.length;}
+    else if(sortKey==='_declab'){x=a._dec?a._dec.label:'';y=b._dec?b._dec.label:'';}
+    else if(sortKey==='MP'){x=a._mp3===null?-1:a._mp3;y=b._mp3===null?-1:b._mp3;}
+    else if(sortKey==='_off'){x=a._off==null?-1:a._off;y=b._off==null?-1:b._off;}
+    else if(sortKey==='_rev'){const f=o=>{const r=REVIEW.get(o.BRDG_NBR);
+      return r?(r.status||'zz'):'zzz';}; x=f(a); y=f(b);}
+    else if(sortKey==='_stype'){x=a._snbi?a._snbi._type:'';y=b._snbi?b._snbi._type:'';}
+    else if(sortKey==='_cond'){const f=o=>{if(!o._snbi)return 99;
+      const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(k2=>parseInt(o._snbi[k2],10)).filter(z=>!isNaN(z));
+      return v.length?Math.min(...v):99;}; x=f(a); y=f(b);}
+    else if(sortKey==='_bh06'){x=(a.RTE_ID||'')||(a._derived&&a._derived.rid)||'';
+      y=(b.RTE_ID||'')||(b._derived&&b._derived.rid)||'';}
+    else {x=a[sortKey];y=b[sortKey];}
+    if(x==null)x=''; if(y==null)y='';
+    if(typeof x==='number'&&typeof y==='number') return (x-y)*sortDir;
+    return String(x).localeCompare(String(y),undefined,{numeric:true})*sortDir;
+  });
+}
+function renderTable(){
+  if(!VIEW.length){$('tscroll').innerHTML='<div class="empty"><b>Nothing matches</b>'+
+    (ALL.length?'Loosen the filters on the left.':'Pick a scope above and press Run.')+'</div>';return;}
+  const cap=VIEW.slice(0,3000);
+  let h='<table><thead><tr>'+COLS.map(c=>'<th data-k="'+c.k+'">'+c.t+
+    (sortKey===c.k?' <span class="ar">'+(sortDir>0?'▲':'▼')+'</span>':'')+'</th>').join('')+'</tr></thead><tbody>';
+  cap.forEach(b=>{h+='<tr data-b="'+esc(b.BRDG_NBR)+'"'+(SEL===b.BRDG_NBR?' class="sel"':'')+'>'+
+    COLS.map(c=>'<td'+(c.mono?' class="mono"':'')+'>'+cell(b,c.k)+'</td>').join('')+'</tr>';});
+  h+='</tbody></table>';
+  if(VIEW.length>cap.length) h+='<div class="empty" style="padding:14px">Showing the first '+
+    cap.length.toLocaleString()+' of '+VIEW.length.toLocaleString()+' rows. Filter further, or export the full set to CSV.</div>';
+  $('tscroll').innerHTML=h;
+  $('tscroll').querySelectorAll('thead th').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k; sortDir=(sortKey===k)?-sortDir:1; sortKey=k; sortView(); renderTable();});
+  $('tscroll').querySelectorAll('tbody tr').forEach(tr=>tr.onclick=()=>select(tr.dataset.b,true));
+}
+
+/* ==========================================================================
+   DETAIL
+   ========================================================================== */
+function select(bn,fromTable){
+  SEL=bn; const b=ALL.find(x=>x.BRDG_NBR===bn); if(!b) return;
+  renderTable(); drawDetail(b); drawRoute(b.RTE_ID);
+  $('drawer').classList.add('open');
+  if(fromTable&&b.LAT_DD) map.setView([b.LAT_DD,b.LONG_DD],Math.max(map.getZoom(),14));
+  const row=$('tscroll').querySelector('tr.sel'); if(row&&!fromTable) row.scrollIntoView({block:'nearest'});
+}
+function findBlock(b,f,showCode){
+  const r=RULEMAP[f], c=(REVIEW.get(b.BRDG_NBR)||{}).cleared||{}, cl=c[f];
+  return '<div class="find '+r.sev+(cl?' isclr':'')+'">'+
+    '<b>'+(showCode&&r.code?'<span class="rcode">'+r.code+'</span> ':'')+esc(r.t)+'</b>'+esc(r.d)+
+    (cl? '<div class="clrnote">Cleared'+(cl.by?' by '+esc(cl.by):'')+
+         (cl.ts?' on '+new Date(cl.ts).toLocaleDateString():'')+
+         (cl.reason?' — '+esc(cl.reason):'')+
+         (isAdmin()?' <a href="#" class="rstr" data-rule="'+f+'">restore</a>':'')+'</div>'
+       : (isAdmin()
+          ? '<div class="clrnote"><a href="#" class="clr" data-rule="'+f+'">clear this finding</a></div>'
+          : '<div class="clrnote" style="opacity:.7">Only an administrator can clear a finding. '+
+            'Leave a note below saying why you think it is not a problem.</div>'))+
+    '</div>';
+}
+function drawDetail(b){
+  const d=b._dec, rid=b.RTE_ID||'', rl=ROUTELEN[rid];
+  $('dr-title').innerHTML='<h2>'+esc(b.BRDG_NBR)+'</h2><div class="s">'+esc(b.COUNTY||'')+
+    ' County &middot; Division '+esc(b.DIVISION||'—')+'</div>';
+  const rv=REVIEW.get(b.BRDG_NBR)||{status:'',note:'',fix06:'',fix07:'',cleared:{},by:'',ts:0};
+  let h='';
+  h+='<div class="revbox">'+
+    '<div class="revrow"><label>Status</label><select id="rv-status">'+
+      RSTATUS.map(s=>'<option value="'+s[0]+'"'+(rv.status===s[0]?' selected':'')+'>'+s[1]+'</option>').join('')+
+    '</select></div>'+
+    '<div class="revrow"><label>Corrected</label>'+
+      '<input type="text" id="rv-f06" placeholder="BH06" value="'+esc(rv.fix06||'')+'" style="flex:1.4">'+
+      '<input type="text" id="rv-f07" placeholder="BH07" value="'+esc(rv.fix07||'')+'" style="flex:1"></div>'+
+    '<textarea id="rv-note" rows="3" placeholder="Notes — what you checked, who you asked, what to do next">'+
+      esc(rv.note||'')+'</textarea>'+
+    '<div class="revmeta">'+(rv.ts?('last edited '+new Date(rv.ts).toLocaleString()+(rv.by?' by '+esc(rv.by):'')):'not reviewed yet')+
+    (b._fix&&b._fix.verdict==='fix'?' &middot; <a href="#" id="rv-take">use the suggested correction</a>':'')+'</div></div>';
+  h+='<div class="big"><div class="k">BH06 &mdash; LRS Route ID</div><div class="v">'+
+     (rid&&rid!=='NA'?esc(rid):'<span style="color:#CF3910">not assigned</span>')+'</div>'+
+     '<div class="d">'+(d?esc(d.prefix+'-'+d.num)+' &middot; '+esc(d.clsName)+' &middot; '+esc(d.invName)+
+     ' &middot; '+esc(d.cntyName)+' County':'Cannot be decoded as an NCDOT 11-digit route ID.')+'</div></div>';
+  if(d){
+    const parts=[[rid[0],'Class'],[rid[1],'Qual'],[rid[2],'Inv'],[rid.slice(3,8),'Number'],[rid.slice(8),'County']];
+    h+='<div class="decode">'+parts.map((p,i)=>'<div'+(i===2||i===4?' class="hl"':'')+
+      '><div class="dg">'+p[0]+'</div><div class="dl">'+p[1]+'</div></div>').join('')+'</div>';
+  }
+  const rawMP=(b.MP==null||b.MP==='')?null:String(b.MP);
+  const wasRounded=rawMP!==null&&rawMP!==fmtMP(b.MP);
+  h+='<div class="big"><div class="k">BH07 &mdash; LRS Milepoint '+
+     '<span style="color:#9A9A9A;letter-spacing:.06em">reported, 3 dp</span></div><div class="v">'+
+     (b._mp3===null?'<span style="color:#CF3910">not assigned</span>':fmtMP(b.MP))+'</div>'+
+     (wasRounded?'<div class="d">NCDOT publishes <span class="mono" style="color:#1A1A1A">'+esc(rawMP)+
+       '</span>, rounded here to the three decimals you report.</div>':'')+
+     '<div class="d">'+(rl?('Route runs '+rl.min.toFixed(3)+' to '+rl.max.toFixed(3)+' in '+esc(b.COUNTY||'')+
+       ' County. Mileposts reset to zero at every county line — this is not the mile marker sign number.')
+       :'Run Deep check to compare this against the route’s true extent in the county.')+'</div>'+
+     (b._off==null?'':'<div class="d" style="border-top:1px solid #DDD;margin-top:8px;padding-top:7px;color:'+
+       (b._off>TOLFT?'#CF3910':'#2E7D32')+'"><b>'+
+       (b._off<10?b._off.toFixed(1):Math.round(b._off).toLocaleString())+' ft</b> from the bridge. '+
+       'Measured by following the route\u2019s own geometry to this milepoint — along the road, not across it.'+
+       (b._off>TOLFT?' Beyond the '+TOLFT+' ft tolerance.':'')+'</div>')+'</div>';
+
+  const ff=b._flags.filter(f=>RULEMAP[f].grp==='fhwa'), qf=b._flags.filter(f=>RULEMAP[f].grp==='qc'),
+        nf=b._flags.filter(f=>RULEMAP[f].grp==='note');
+  h+='<div class="dr-sec">FHWA submittal checks</div>';
+  if(!ff.length) h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6">'+
+    '<b>Passes</b>BH06 and BH07 clear every FHWA validation rule'+(HPMS.size?', including the HPMS match.':
+    '. BH06-3 (HPMS match) is untested until you load your HPMS route list.')+'</div>';
+  else ff.forEach(f=>{h+=findBlock(b,f,true);});
+  h+='<div class="dr-sec">Strinteg QC</div>';
+  if(!qf.length) h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6">'+
+    '<b>Nothing further</b>No sign the value is wrong.</div>';
+  else qf.forEach(f=>{h+=findBlock(b,f,false);});
+  if(nf.length){ h+='<div class="dr-sec">Notes</div>';
+    nf.forEach(f=>{h+=findBlock(b,f,false);}); }
+  if(!ff.length&&qf.some(f=>RULEMAP[f].sev==='e'))
+    h+='<div class="find e" style="margin-top:8px"><b>Reads clean, is not</b>'+
+      'This bridge passes every FHWA rule and would submit without an error — but the milepoint '+
+      'cannot be right. FHWA only tests BH07 for numeric and length.</div>';
+
+  if(b._snbi){
+    const s=b._snbi, cond=k=>{const v=s[k]; if(v==null||v==='') return '—';
+      return v+(CONDNAME[String(v)]?' &middot; '+CONDNAME[String(v)]:'');};
+    h+='<div class="dr-sec">SNBI inventory &mdash; '+esc(s._type)+'</div><dl class="kv">'+
+     [['Deck',cond('DeckCondition')],['Superstructure',cond('SuperStructureCondition')],
+      ['Substructure',cond('SubStructureCondition')],['Culvert',cond('CulvertCondition')],
+      ['Last inspected',fmtDate(s.LastInspectDate)],['Year built',s.YearBuilt],
+      ['Scour critical',s.ScourCritical],['Fracture critical',s.FractureCritical],
+      ['Posted',s.PostedOpenClosed],['Sufficiency',s.SufficiencyRate],
+      ['Structure length',s.StructureLength],['Deck width',s.BridgeDeckWidth],
+      ['Skew',s.FedSkew],['Lanes on',s.ThroughLanesOn],
+      ['Main type',[s.StructureTypeMainMaterial,s.StructureTypeMainCon].filter(Boolean).join(' &middot; ')],
+      ['Service on / under',[s.ServiceOn,s.ServiceUnder].filter(Boolean).join(' / ')],
+      ['NHS',s.NHS],['Owner',s.OwnerName||s.Owner],
+      ['Legacy inv. route',s.InventoryRoute]]
+     .map(r=>'<dt>'+r[0]+'</dt><dd>'+(r[1]==null||r[1]===''?'—':r[1])+'</dd>').join('')+'</dl>'+
+     (s.InventoryRoute?'<p class="hint" style="margin-top:6px">Legacy inventory route is the old 9-digit NBI '+
+      'identifier, not BH06. Do not report it as the LRS Route ID.</p>':'');
+  }
+  h+='<div class="dr-sec">Bridge record</div><dl class="kv">'+
+   [['Feature carried',b.F_CARRIED],['Feature crossed',b.FTR_INTRSC],['Structure type',b.BRDG_TYP_NM],
+    ['Maint. resp.',b.MAINT_RESP],['Func. class',b.FUNC_CLASS],['Service on',b.SERVICEON],
+    ['Service under',b.SERVICEUNDER],['AADT',b.AADT==null?'':Number(b.AADT).toLocaleString()],
+    ['Latitude',b.LAT_DD],['Longitude',b.LONG_DD]]
+   .map(r=>'<dt>'+r[0]+'</dt><dd>'+esc(r[1]==null||r[1]===''?'—':r[1])+'</dd>').join('')+'</dl>';
+
+  if(b._derived&&b._derived.verdict==='notreq'){
+    h+='<div class="dr-sec">Derived value</div><div class="find i"><b>No BH06 required</b>'+
+      esc(b._derived.why||'')+' Nothing was invented for it &mdash; giving it the road underneath is exactly '+
+      'the error BH06 exists to avoid.</div>';
+  }
+  if(b._derived&&b._derived.verdict==='derived'){
+    const d=b._derived, dec=decodeRID(d.rid), hi=d.conf==='high';
+    h+='<div class="dr-sec">Derived value &mdash; proposal</div>'+
+      '<div class="find '+(hi?'':d.conf==='medium'?'i':'w')+'" style="'+(hi?'border-left-color:#2E7D32;background:#E6F1E6':'')+'">'+
+      '<b>'+(hi?'High confidence':d.conf==='medium'?'Medium confidence':'Confirm before use')+'</b>'+
+      esc(d.how)+'. '+d.cands+' route'+(d.cands===1?'':'s')+' lie within 150 ft of this structure.</div>'+
+      '<div class="big" style="border-top-color:'+(hi?'#2E7D32':'#C9A227')+'">'+
+      '<div class="k">Proposed BH06 / BH07</div><div class="v">'+esc(d.rid)+' @ '+d.mp.toFixed(3)+'</div>'+
+      '<div class="d">'+(dec?esc(dec.prefix+'-'+dec.num+' · '+dec.invName+' · '+dec.cntyName+' County'):'')+
+      '<br>Read off that route\u2019s geometry '+d.offset.toFixed(0)+' ft from the published coordinates. '+
+      'NCDOT currently publishes no value for this structure.</div></div>';
+  }
+  if(b._fix&&b._fix.verdict!=='fix'){
+    h+='<div class="dr-sec">Carried-route triage</div>'+
+      (b._fix.verdict==='stale'
+        ? '<div class="find i"><b>BH06 is probably right — the description is stale</b>'+
+          'The route named in Feature Carried is not at this bridge, but the route BH06 already points at '+
+          'is. That is the signature of a redesignation — NC-295 became I-295, US-70 Bypass became I-42, '+
+          'NC-147 became I-885. Fix the Feature Carried text, not BH06.</div>'
+        : '<div class="find w"><b>Neither route is at this bridge</b>'+
+          'Neither the route named in Feature Carried nor the one coded in BH06 is within 150 ft of these '+
+          'coordinates ('+b._fix.cands+' routes are). Usually a mislocated structure or a retired route — '+
+          'needs a person.</div>');
+  }
+  if(b._fix&&b._fix.verdict==='fix'){
+    h+='<div class="dr-sec">Suggested correction</div>'+
+      '<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6">'+
+      '<b>Matched to the carried route</b>'+
+      'Feature Carried names <b>'+carriedTokens(b.F_CARRIED).map(esc).join(', ')+'</b>. Of the '+b._fix.cands+
+      ' routes within 150 ft of this bridge, <b>'+esc(b._fix.rid)+'</b> is the one that decodes to a carried route.'+
+      (b._fix.alts>1?' <b>'+b._fix.alts+' candidates matched</b> — confirm which before applying.':'')+
+      '</div>'+
+      '<div class="big" style="border-top-color:#2E7D32"><div class="k">Suggested BH06 / BH07</div>'+
+      '<div class="v">'+esc(b._fix.rid)+' @ '+b._fix.mp.toFixed(3)+'</div>'+
+      '<div class="d">Milepoint read off that route&rsquo;s own geometry at this bridge'+
+      (b._fix.offset!=null?', '+b._fix.offset.toFixed(1)+' ft from the published coordinates':'')+
+      '. Currently coded <span class="mono">'+esc(b.RTE_ID||'')+' @ '+fmtMP(b.MP)+'</span>. Review before applying.</div></div>';
+  }
+  const toks=carriedTokens(b.F_CARRIED);
+  if(toks.length>1) h+='<div class="dr-sec">Concurrent routes</div><p style="font-size:12px;line-height:1.55">'+
+    'Feature Carried names '+toks.length+' routes: <b>'+toks.map(esc).join(', ')+'</b>. '+
+    'Under SNBI these are multiple <em>route</em> records on one highway feature, so the bridge still gets a '+
+    'single BH06 / BH07 pair — not one per route.</p>';
+
+  h+='<div style="margin-top:18px;display:flex;gap:6px;flex-wrap:wrap">'+
+    '<button class="btn ghost" onclick="zoomTo(\''+esc(b.BRDG_NBR)+'\')">Zoom to bridge</button>'+
+    (b.LAT_DD?'<button class="btn ghost" onclick="pinAt('+b.LAT_DD+','+b.LONG_DD+')">Re-measure from GIS</button>':'')+
+    '</div>';
+  $('dr-body').innerHTML=h;
+
+  /* --- review editor bindings --- */
+  const bn=b.BRDG_NBR;
+  const st=$('rv-status'), nt=$('rv-note'), f6=$('rv-f06'), f7=$('rv-f07');
+  if(st) st.onchange=()=>{ rec(bn,true).status=st.value; touch(bn); applyFilters(); };
+  if(nt) nt.onchange=()=>{ rec(bn,true).note=nt.value; touch(bn); applyFilters(); };
+  if(f6) f6.onchange=()=>{ rec(bn,true).fix06=f6.value.trim(); touch(bn); applyFilters(); };
+  if(f7) f7.onchange=()=>{ rec(bn,true).fix07=f7.value.trim(); touch(bn); applyFilters(); };
+  const take=$('rv-take');
+  if(take) take.onclick=e=>{ e.preventDefault();
+    const r=rec(bn,true); r.fix06=b._fix.rid; r.fix07=b._fix.mp.toFixed(3);
+    if(!r.status) r.status='progress';
+    touch(bn); applyFilters(); drawDetail(b); };
+  $('dr-body').querySelectorAll('a.clr').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    const why=prompt('Clear "'+RULEMAP[a.dataset.rule].t+'" for bridge '+bn+
+      '.\n\nWhy is this not a problem? (kept in the review file)','');
+    if(why===null) return;
+    clearFinding(bn,a.dataset.rule,why);
+  });
+  $('dr-body').querySelectorAll('a.rstr').forEach(a=>a.onclick=e=>{
+    e.preventDefault(); unclearFinding(bn,a.dataset.rule); });
+}
+function zoomTo(bn){const b=ALL.find(x=>x.BRDG_NBR===bn); if(b&&b.LAT_DD) map.setView([b.LAT_DD,b.LONG_DD],17);}
+
+/* ==========================================================================
+   PIN DROP  — NCDOT's own "route + milepost at a point" geoprocessing service
+   ========================================================================== */
+function toStatePlane(lat,lon){
+  /* EPSG:2264 — NAD83 / North Carolina (ftUS), Lambert conformal conic 2SP.
+     Verified against pyproj to sub-millimetre agreement. */
+  const D=Math.PI/180;
+  const a=6378137.0, f=1/298.257222101, e=Math.sqrt(2*f-f*f);
+  const p1=36.16666666666666*D, p2=34.33333333333334*D;
+  const p0=33.75*D, l0=-79.0*D;
+  const FE=2000000.0, FN=0.0;                    /* false origin, US survey feet */
+  const M=p=>Math.cos(p)/Math.sqrt(1-e*e*Math.pow(Math.sin(p),2));
+  const T=p=>Math.tan(Math.PI/4-p/2)/Math.pow((1-e*Math.sin(p))/(1+e*Math.sin(p)),e/2);
+  const n=(Math.log(M(p1))-Math.log(M(p2)))/(Math.log(T(p1))-Math.log(T(p2)));
+  const F=M(p1)/(n*Math.pow(T(p1),n));
+  const rho=p=>a*F*Math.pow(T(p),n);
+  const rho0=rho(p0), theta=n*(lon*D-l0), r=rho(lat*D);
+  const K=1/0.3048006096012192;                  /* metres -> US survey feet */
+  return {x:FE+r*Math.sin(theta)*K, y:FN+(rho0-r*Math.cos(theta))*K};
+}
+async function pinAt(lat,lon){
+  busy(true,'Identify route / milepoint','submitting point to NCDOT',10);
+  try{
+    const p=toStatePlane(lat,lon);
+    const fs={geometryType:'esriGeometryPoint',spatialReference:{wkid:2264},
+      fields:[{name:'Id',type:'esriFieldTypeInteger',alias:'Id'}],
+      features:[{geometry:{x:p.x,y:p.y},attributes:{Id:0}}]};
+    const sub=await (await fetch(GPTOOL+'/submitJob',{method:'POST',
+      body:new URLSearchParams({PointLocations:JSON.stringify(fs),f:'json'})})).json();
+    if(!sub.jobId) throw new Error(sub.error?sub.error.message:'job not accepted');
+    let st=sub;
+    for(let i=0;i<60;i++){
+      await new Promise(r=>setTimeout(r,1600));
+      busy(true,'Identify route / milepoint','NCDOT is processing',Math.min(92,20+i*4));
+      st=await (await fetch(GPTOOL+'/jobs/'+sub.jobId+'?f=json')).json();
+      if(!['esriJobSubmitted','esriJobExecuting','esriJobWaiting','esriJobNew'].includes(st.jobStatus)) break;
+    }
+    if(st.jobStatus!=='esriJobSucceeded') throw new Error('job '+st.jobStatus);
+    const res=await (await fetch(GPTOOL+'/jobs/'+sub.jobId+'/results/IdentifyRouteMPResults?f=json')).json();
+    const a=((res.value||{}).features||[])[0];
+    busy(false);
+    if(!a) { toast('No NCDOT route found at that point.',4000); return; }
+    const at=a.attributes, d=decodeRID(at.RID);
+    const conc=[2,3,4,5,6].map(i=>at['Route'+i]).filter(Boolean);
+    L.popup({maxWidth:330}).setLatLng([lat,lon]).setContent(
+      '<div class="pop-t">Route &amp; milepoint at this point</div>'+
+      '<div class="pop-k">BH06 LRS Route ID</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
+      (d?'<div class="pop-k" style="margin-top:2px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
+      '<div class="pop-k" style="margin-top:7px">BH07 LRS Milepoint</div><div class="pop-v" style="font-size:15px">'+
+        (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
+      (at.StreetName?'<div class="pop-k" style="margin-top:7px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
+      (conc.length?'<div class="pop-k" style="margin-top:7px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
+      '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px;line-height:1.45">'+
+      'This is the <b>nearest</b> route. At a grade separation that is often the road <b>underneath</b> — '+
+      'BH06 must be the route <b>carried on</b> the bridge.</div>').openOn(map);
+  }catch(e){ busy(false); toast('Pin drop failed: '+e.message,6000); }
+}
+
+/* ==========================================================================
+   DIAGNOSTICS  — so a blocked network reports itself instead of just failing
+   ========================================================================== */
+async function diagnostics(){
+  const tests=[
+   ['Mapping library','built in or CDN', async()=>typeof L!=='undefined'?'loaded':'BLOCKED'],
+   ['NCDOT bridges','gis11.services.ncdot.gov', async()=>{
+      const j=await esriQuery(BRIDGES,{where:'1=1',returnCountOnly:'true'});
+      return (j.count||0).toLocaleString()+' bridges';}],
+   ['NCDOT road network','gis11.services.ncdot.gov', async()=>{
+      const j=await esriQuery(ROADCHAR,{where:"RouteID='20000074060'",returnCountOnly:'true'});
+      return (j.count||0).toLocaleString()+' segments';}],
+   ['County boundaries','gis11.services.ncdot.gov', async()=>{
+      const j=await esriQuery(COUNTYBDY,{where:'1=1',returnCountOnly:'true'});
+      return (j.count||0)+' counties';}],
+   ['Pin-drop tool','gis11 GPServer', async()=>{
+      const r=await fetch(GPTOOL+'?f=json'); const j=await r.json();
+      return j.name?'available':'unexpected reply';}],
+   ['FHWA HPMS','geo.dot.gov', async()=>{
+      const j=await esriQuery(HPMSURL,{where:'1=1',returnCountOnly:'true'});
+      return (j.count||0).toLocaleString()+' HPMS records';}],
+   ['Background map tiles','server.arcgisonline.com', async()=>new Promise(res=>{
+      const i=new Image(); const t=setTimeout(()=>res('BLOCKED (timeout)'),8000);
+      i.onload=()=>{clearTimeout(t);res('reachable');};
+      i.onerror=()=>{clearTimeout(t);res('BLOCKED');};
+      i.src=BASE.street[0].replace('{z}','5').replace('{y}','12').replace('{x}','8')+'?cb='+performance.now();})]
+  ];
+  let h2='<div class="dr-sec" style="margin-top:0">Network diagnostics</div>'+
+    '<p style="font-size:12px;line-height:1.5">What this machine can reach. Everything except the tiles is '+
+    'required; tiles are cosmetic.</p><dl class="kv" style="grid-template-columns:150px 1fr">';
+  $('dr-title').innerHTML='<h2>Diagnostics</h2><div class="s">connectivity from this machine</div>';
+  $('dr-body').innerHTML=h2+'</dl>'; $('drawer').classList.add('open');
+  const rows=[];
+  for(const [name,host,fn] of tests){
+    let out,okc;
+    try{ out=await fn(); okc=!/BLOCK|unexpected/i.test(String(out)); }
+    catch(e){ out='BLOCKED — '+(e.message||'no response'); okc=false; }
+    rows.push('<dt>'+esc(name)+'</dt><dd><span style="color:'+(okc?'#2E7D32':'#CF3910')+
+      ';font-weight:600">'+esc(out)+'</span><br><span style="color:#9A9A9A;font-size:11px">'+esc(host)+'</span></dd>');
+    $('dr-body').innerHTML=h2+rows.join('')+'</dl>';
+  }
+  const bad=rows.filter(r=>r.includes('#CF3910')).length;
+  $('dr-body').innerHTML=h2+rows.join('')+'</dl>'+
+    (bad?'<div class="find w" style="margin-top:14px"><b>'+bad+' blocked</b>'+
+      'Give this list to IT. The tool needs <span class="mono">gis11.services.ncdot.gov</span> for all data, '+
+      '<span class="mono">geo.dot.gov</span> for the HPMS test, and '+
+      '<span class="mono">server.arcgisonline.com</span> only for background imagery.</div>'
+     :'<div class="find" style="margin-top:14px;border-left-color:#2E7D32;background:#E6F1E6">'+
+      '<b>All clear</b>Everything this tool needs is reachable from this machine.</div>');
+}
+
+/* ==========================================================================
+   EXPORT
+   ========================================================================== */
+function exportCSV(){
+  const cols=['BRDG_NBR','COUNTY','DIVISION','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','BH07_SOURCE_VALUE','ROUTE_DECODED',
+    'ROUTE_CLASS','INVENTORY_CODE','ROUTE_MIN_MP','ROUTE_MAX_MP','OFFSET_FT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
+    'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
+  const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
+  const rows=[cols.join(',')];
+  VIEW.forEach(b=>{const d=b._dec,rl=ROUTELEN[b.RTE_ID];
+    rows.push([b.BRDG_NBR,b.COUNTY,b.DIVISION,b.RTE_ID,fmtMP(b.MP),
+      (b.MP==null||b.MP==='')?'':String(b.MP),d?d.label:'',
+      d?d.clsName:'',d?d.invName:'',rl?rl.min.toFixed(3):'',rl?rl.max.toFixed(3):'',
+      b.F_CARRIED,b.FTR_INTRSC,b.MAINT_RESP,b.FUNC_CLASS,b.LAT_DD,b.LONG_DD,
+      (REVIEW.get(b.BRDG_NBR)||{}).status||'', (REVIEW.get(b.BRDG_NBR)||{}).note||'',
+      (REVIEW.get(b.BRDG_NBR)||{}).by||'',
+      (REVIEW.get(b.BRDG_NBR)||{}).ts?new Date((REVIEW.get(b.BRDG_NBR)).ts).toISOString().slice(0,10):'',
+      (REVIEW.get(b.BRDG_NBR)||{}).fix06||'', (REVIEW.get(b.BRDG_NBR)||{}).fix07||'',
+      Object.keys((REVIEW.get(b.BRDG_NBR)||{}).cleared||{}).map(f=>RULEMAP[f]?RULEMAP[f].t:f).join('; '),
+      b._snbi?b._snbi._type:'', b._snbi?b._snbi.DeckCondition:'', b._snbi?b._snbi.SuperStructureCondition:'',
+      b._snbi?b._snbi.SubStructureCondition:'', b._snbi?b._snbi.CulvertCondition:'',
+      b._snbi?fmtDate(b._snbi.LastInspectDate):'', b._snbi?b._snbi.YearBuilt:'',
+      b._snbi?b._snbi.ScourCritical:'', b._snbi?b._snbi.FractureCritical:'', b._snbi?b._snbi.PostedOpenClosed:'',
+      b._snbi?b._snbi.StructureLength:'', b._snbi?b._snbi.BridgeDeckWidth:'', b._snbi?b._snbi.FedSkew:'',
+      b._snbi?b._snbi.NHS:'', b._snbi?b._snbi.InventoryRoute:'',
+      b._fix&&b._fix.rid?b._fix.rid:'', b._fix&&b._fix.mp!=null?b._fix.mp.toFixed(3):'',
+      b._fix?b._fix.verdict:'',
+      SEVNAME[b._sev],b._fhwa>0?'YES':'NO',
+      [...new Set(b._flags.filter(f=>RULEMAP[f].grp==='fhwa').map(f=>RULEMAP[f].code))].join(';'),
+      b._flags.filter(f=>RULEMAP[f].grp==='fhwa').map(f=>RULEMAP[f].t).join('; '),
+      b._flags.filter(f=>RULEMAP[f].grp==='qc').map(f=>RULEMAP[f].t).join('; '),
+      b._flags.filter(f=>RULEMAP[f].grp==='note').map(f=>RULEMAP[f].t).join('; '),
+      b._flags.join(';')].map(q).join(','));});
+  const blob=new Blob(['﻿'+rows.join('\r\n')],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url; a.style.display='none';
+  a.download='NCDOT_BH06_BH07_'+$('mode').value+'_'+VIEW.length+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(url);},400);
+  toast('Exported '+VIEW.length.toLocaleString()+' rows.',3000);
+}
+
+/* ==========================================================================
+   HPMS ROUTE LIST  — makes BH06-3 a real test instead of a risk prediction
+   ========================================================================== */
+function loadHPMS(text){
+  /* Accept anything: a bare list, a CSV with a Route_ID column, a full HPMS
+     extract. We pull every distinct token that looks like an NCDOT route ID
+     and, failing that, every distinct non-empty cell in the widest column. */
+  const ids=new Map();
+  const lines=text.split(/\r?\n/).filter(Boolean);
+  const hdr=(lines[0]||'').toLowerCase();
+  const sep=(hdr.match(/\t/g)||[]).length>(hdr.match(/,/g)||[]).length?'\t':',';
+  const cols=hdr.split(sep).map(s=>s.trim().replace(/^"|"$/g,''));
+  const ci=cols.findIndex(x=>/route.?id|lrs.?id/.test(x));
+  const bi=cols.findIndex(x=>/begin/.test(x)), ei=cols.findIndex(x=>/end/.test(x));
+  if(ci>=0){                                        /* proper header row */
+    lines.slice(1).forEach(l=>{const c=l.split(sep);
+      const v=(c[ci]||'').trim().replace(/^"|"$/g,''); if(!v) return;
+      const mn=bi>=0?parseFloat(c[bi]):NaN, mx=ei>=0?parseFloat(c[ei]):NaN;
+      const cur=ids.get(v);
+      ids.set(v,{mn:isNaN(mn)?(cur?cur.mn:null):(cur&&cur.mn!=null?Math.min(cur.mn,mn):mn),
+                 mx:isNaN(mx)?(cur?cur.mx:null):(cur&&cur.mx!=null?Math.max(cur.mx,mx):mx)});});
+  }
+  if(!ids.size){                                    /* bare list of ids anywhere */
+    (text.match(/\b\d{11}\b/g)||[]).forEach(x=>ids.set(x,{mn:null,mx:null}));
+  }
+  HPMS=ids; HPMSGOT=new Set();
+  $('hpmsn').textContent=ids.size?ids.size.toLocaleString()+' HPMS routes loaded':'';
+  $('hpmsbtn').classList.toggle('on',!!ids.size);
+  if(!ids.size){ toast('No route IDs found in that file.',4500); return; }
+  if(ALL.length){ revalidate(); applyFilters(); }
+  const miss=ALL.filter(b=>b._flags.includes('BH06_3_HPMS')).length;
+  toast(ids.size.toLocaleString()+' HPMS route IDs loaded. BH06-3 is now a real test'+
+    (ALL.length?' — '+miss.toLocaleString()+' bridge'+(miss===1?'':'s')+' reference a route that is not in your HPMS list.':'.'),8000);
+}
+
+/* ==========================================================================
+   WIRING
+   ========================================================================== */
+$('mode').onchange=buildArg;
+$('run').onclick=runAll;
+$('deep').onclick=deepCheck;
+$('locate').onclick=locateCheck;
+$('resolve').onclick=resolveCarried;
+$('fillnull').onclick=deriveMissing;
+$('ncdotcsv').onclick=exportNCDOT;
+$('csv').onclick=exportCSV;
+$('setbtn').onclick=()=>{ $('settings').classList.add('on'); syncSettings(); };
+$('set-x').onclick=()=>$('settings').classList.remove('on');
+$('settings').onclick=e=>{ if(e.target.id==='settings') $('settings').classList.remove('on'); };
+function syncSettings(){
+  const c=reviewCounts();
+  $('revstate').textContent = c.bridges
+    ? c.bridges.toLocaleString()+' structures reviewed, '+c.cleared.toLocaleString()+' findings cleared.'+
+      (REVDIRTY?' Unsaved changes — save before you close.':' Saved.')
+    : 'Notes, statuses and cleared findings live in a file you keep. Merge combines two reviewers.';
+  if($('pwbtn')) $('pwbtn').style.display=isAdmin()?'':'none';
+}
+document.querySelectorAll('.mtabs button').forEach(t=>t.onclick=()=>{
+  document.querySelectorAll('.mtabs button').forEach(x=>x.classList.remove('on'));
+  t.classList.add('on');
+  document.body.className=document.body.className.replace(/\bpane-\S+/g,'').trim()+' pane-'+t.dataset.pane;
+  setTimeout(()=>{ try{ map.invalidateSize(); }catch(e){} },60);
+});
+if(window.matchMedia('(max-width:860px)').matches) document.body.classList.add('pane-map');
+window.addEventListener('resize',()=>{ try{ map.invalidateSize(); }catch(e){} });
+$('diag').onclick=diagnostics;
+$('reftog').onclick=()=>{const b2=$('refbody'),on=b2.style.display==='none';
+  b2.style.display=on?'':'none'; $('reftog').textContent=on?'hide':'show';};
+$('reviewer').oninput=e=>{REVIEWER=e.target.value.trim();};
+$('revsave').onclick=saveReview;
+$('revopen').onclick=()=>{$('revfile').dataset.merge='0';$('revfile').click();};
+$('revmerge').onclick=()=>{$('revfile').dataset.merge='1';$('revfile').click();};
+$('revfile').onchange=e=>{const f=e.target.files[0]; if(!f) return;
+  const merge=$('revfile').dataset.merge==='1';
+  const r=new FileReader(); r.onload=()=>openReview(String(r.result),merge); r.readAsText(f); e.target.value='';};
+$('f-rev').onchange=applyFilters;
+$('hidecleared').onchange=applyFilters;
+window.addEventListener('beforeunload',e=>{ if(REVDIRTY){ e.preventDefault(); e.returnValue=''; } });
+$('snbibtn').onclick=loadSNBI;
+$('silentbtn').onclick=()=>{
+  silentOnly=!silentOnly; $('silentbtn').classList.toggle('on',silentOnly);
+  $('silentbtn').textContent=silentOnly?'Showing only clean-but-wrong — click to undo'
+                                       :'Show what submits clean but is wrong';
+  applyFilters();};
+$('clearf').onclick=()=>{['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax']
+  .concat(['f-stype','f-cond']).forEach(i=>$(i).value=''); activeChecks.clear();
+  silentOnly=false; $('silentbtn').classList.remove('on');
+  $('silentbtn').textContent='Show what submits clean but is wrong'; applyFilters();};
+['f-q','f-mpmin','f-mpmax'].forEach(i=>$(i).oninput=()=>{clearTimeout(window._d);window._d=setTimeout(applyFilters,280);});
+['f-county','f-div','f-class','f-inv','f-maint','f-stype','f-cond'].forEach(i=>$(i).onchange=applyFilters);
+$('dr-x').onclick=()=>{$('drawer').classList.remove('open');SEL=null;routeLayer.clearLayers();renderTable();};
+$('l-county').onchange=e=>{if(countyLayer) e.target.checked?countyLayer.addTo(map):map.removeLayer(countyLayer);};
+$('l-label').onchange=e=>{e.target.checked?labelLayer.addTo(map):map.removeLayer(labelLayer);};
+$('l-route').onchange=()=>{const b=ALL.find(x=>x.BRDG_NBR===SEL); drawRoute(b?b.RTE_ID:null);};
+$('f-base').onchange=e=>{if(tilesDead) return; map.removeLayer(baseLayer);
+  tileFails=0; baseLayer=makeBase(e.target.value).addTo(map); baseLayer.bringToBack();};
+$('hpmsfhwa').onclick=()=>fetchHPMS(ALL.length&&$('mode').value!=='all'?neededFips():null);
+$('hpmsbtn').onclick=()=>$('hpmsfile').click();
+$('hpmsfile').onchange=e=>{const f=e.target.files[0]; if(!f) return;
+  const r=new FileReader(); r.onload=()=>loadHPMS(String(r.result)); r.readAsText(f); e.target.value='';};
+$('pin').onclick=()=>{pinMode=!pinMode;$('pin').classList.toggle('on',pinMode);
+  document.body.classList.toggle('pinmode',pinMode);
+  toast(pinMode?'Pin drop on — click anywhere on the map to read the route and milepoint there.'
+               :'Pin drop off.',4000);};
+map.on('click',e=>{if(pinMode) pinAt(e.latlng.lat,e.latlng.lng);});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('drawer').classList.remove('open');
+  if(pinMode)$('pin').click();}});
+
+/* splitter */
+(function(){let drag=false;
+  $('split').addEventListener('mousedown',e=>{drag=true;e.preventDefault();document.body.style.userSelect='none';});
+  window.addEventListener('mousemove',e=>{if(!drag)return;
+    const r=$('content').getBoundingClientRect(); let h=r.bottom-e.clientY;
+    h=Math.max(90,Math.min(r.height-140,h)); $('tablewrap').style.height=h+'px'; map.invalidateSize();});
+  window.addEventListener('mouseup',()=>{drag=false;document.body.style.userSelect='';});})();
+
+/* service publication date */
+(async()=>{try{const j=await (await fetch(SVC+'/NCDOT_Bridges/MapServer?f=json')).json();
+  const m=(j.serviceDescription||'').match(/(\d{2}\/\d{2}\/\d{4})/);
+  $('pubdate').textContent=m?('Bridge layer published '+m[1]):'connected';}catch(e){$('pubdate').textContent='offline';}})();
+
+/*GATEJS-START*/
+/* ==========================================================================
+   ACCESS GATE
+   ========================================================================== */
+function applyRole(){
+  const adm=isAdmin(), rb=$('rolebadge');
+  if(rb){ rb.textContent = adm?'Administrator':'Reviewer'; rb.classList.toggle('adm',adm);
+          if(!AUTH.admin) rb.textContent='Unconfigured'; }
+  if($('pwbtn')) $('pwbtn').style.display = adm?'':'none';
+}
+async function tryGate(){
+  const pw=$('gatepw').value;
+  if(!pw){ $('gateerr').textContent='Enter a password.'; return; }
+  const hx=await sha(pw);
+  if(hx===AUTH.admin){ ROLE='admin'; }
+  else if(hx===AUTH.user){ ROLE='user'; }
+  else { $('gateerr').textContent='That password is not recognised.'; $('gatepw').select(); return; }
+  $('gate').classList.remove('on'); applyRole();
+  toast('Signed in as '+(isAdmin()?'administrator — you can clear findings and change passwords.'
+                                   :'reviewer — you can review and annotate, but not clear findings.'),7000);
+}
+async function applyPasswords(){
+  const u=$('pw-user').value, a=$('pw-admin').value, c=$('pw-conf').value;
+  const msg=$('pw-msg');
+  if(!u&&!a){ msg.textContent='Enter at least one new password.'; return; }
+  if((u||a)&&c!==(a||u)){ msg.textContent='Confirmation does not match the password you changed.'; return; }
+  if((u||a).length<4){ msg.textContent='Use at least four characters.'; return; }
+  const next={salt:AUTH.salt, admin:a?await sha(a):AUTH.admin, user:u?await sha(u):AUTH.user};
+  if(!next.admin){ msg.textContent='Set an admin password too, or nobody can change these later.'; return; }
+  const line="/*AUTH-START*/const AUTH={salt:'"+next.salt+"',admin:'"+next.admin+"',user:'"+next.user+"'};/*AUTH-END*/";
+  if(!/\/\*AUTH-START\*\/[\s\S]*?\/\*AUTH-END\*\//.test(PRISTINE)){
+    msg.textContent='Could not rewrite this copy. Ask for a fresh file.'; return; }
+  const out=PRISTINE.replace(/\/\*AUTH-START\*\/[\s\S]*?\/\*AUTH-END\*\//,line);
+  const blob=new Blob([out],{type:'text/html'});
+  const url=URL.createObjectURL(blob), el=document.createElement('a');
+  el.href=url; el.download='NCDOT_BH06_BH07_Validator_configured.html'; el.style.display='none';
+  document.body.appendChild(el); el.click();
+  setTimeout(()=>{document.body.removeChild(el);URL.revokeObjectURL(url);},400);
+  msg.style.color='#2E7D32';
+  msg.textContent='Downloaded NCDOT_BH06_BH07_Validator_configured.html — hand that file out. '+
+    'This copy still has the old passwords.';
+  toast('Configured copy downloaded. Distribute that file; this one is unchanged.',9000);
+}
+$('gatego').onclick=tryGate;
+$('gatepw').onkeydown=e=>{ if(e.key==='Enter') tryGate(); };
+$('pwbtn').onclick=()=>{ if(!needAdmin('Changing passwords')) return;
+  ['pw-user','pw-admin','pw-conf'].forEach(i=>$(i).value='');
+  $('pw-msg').textContent=''; $('pw-msg').style.color=''; $('admin').classList.add('on'); $('pw-user').focus(); };
+$('pw-x').onclick=()=>$('admin').classList.remove('on');
+$('pw-go').onclick=applyPasswords;
+
+if(AUTH.admin||AUTH.user){ ROLE='none'; $('gate').classList.add('on'); setTimeout(()=>$('gatepw').focus(),80); }
+else { ROLE='admin'; setTimeout(()=>toast('No passwords are set on this copy — you have administrator access. '+
+  'Use Passwords to set them, then hand out the configured copy it downloads.',12000),900); }
+applyRole();
+/*GATEJS-END*/
+
+renderChecks();
+loadCounties();
+</script>
+</body>
+</html>
