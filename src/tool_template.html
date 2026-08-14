@@ -357,6 +357,13 @@ body.field.sheet #fieldbar{background:var(--orange)}
 .pop-k{color:var(--gray-2);font-size:11px}
 .pop-v{font-family:ui-monospace,monospace;color:var(--black)}
 .pinctl{border:0;box-shadow:none}
+/* Centred over the map rather than pinned to a corner, so the drawer cannot
+   cover it. Leaflet has no top-centre slot, so the control is added top-left
+   and moved. */
+.pintop{position:absolute;top:10px;left:50%;transform:translateX(-50%);z-index:900}
+.pintop button.on{animation:pinpulse 1.6s ease-in-out infinite}
+@keyframes pinpulse{0%,100%{box-shadow:0 1px 4px rgba(0,0,0,.18)}
+  50%{box-shadow:0 0 0 6px rgba(207,57,16,.22),0 1px 4px rgba(0,0,0,.18)}}
 .pinctl button{display:flex;align-items:center;gap:7px;background:#fff;border:1px solid var(--line);
   padding:8px 12px;font-family:var(--font-h);font-size:11px;letter-spacing:.14em;text-transform:uppercase;
   color:var(--gray);cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.18)}
@@ -419,6 +426,7 @@ body.field.sheet #fieldbar{background:var(--orange)}
 <div id="fieldbar">
   <button id="fb-here" title="Centre on me">&#9678; <span>Here</span></button>
   <span id="fb-state"></span>
+  <button id="fb-save" title="Save the map and roads around the bridges near you">&#8681; Map</button>
   <button id="fb-table" title="Show the results table">Bridges &#9650;</button>
 </div>
 
@@ -730,7 +738,7 @@ const RULES=[
  {id:'HAS_UNDER_FEATURE', grp:'note', sev:'i', t:'Has roadways beneath it',
   d:'This structure spans one or more highways, so it has intersected features as well as carried ones. Each has its own record in the panel. NCDOT\u2019s prior submittal holds no intersected features, so any shown here were measured against the road network rather than read from a file — check them.'},
  {id:'HPMS_MP_OUT', grp:'qc', sev:'w', t:'BH07 outside the HPMS extent',
-  d:'The route is in HPMS but the milepoint falls outside the begin/end points HPMS holds for it. The route ID passes BH06-3 while the milepoint sits off the end of what the state actually reported. Needs the HPMS list loaded.'},
+  d:'The route is in HPMS but the milepoint falls outside the begin/end points HPMS holds for it. The route ID passes BH06-3 while the milepoint sits off the end of what the state actually reported. HPMS reports the same LRS measure NCDOT does, so this is a like-for-like comparison — checked across all 221,036 routes the two have in common, where 210,500 agree exactly and 213,672 agree to within 264 ft. About 938 disagree by more than a quarter mile, so on those few this rule is comparing two slightly different segmentations rather than finding a wrong milepoint. Needs the HPMS list loaded.'},
  {id:'BH07_1_NUM', grp:'fhwa', code:'BH07-1', sev:'e', t:'BH07 not a valid number',
   d:'The LRS Mile Point must be a valid numeric value. Null or non-numeric fails.'},
  {id:'BH07_2_LEN', grp:'fhwa', code:'BH07-2', sev:'e', t:'BH07 over 8 digits',
@@ -796,6 +804,10 @@ let PINTARGET=null;                  /* {bn,des} — the feature a pin drop shou
 let REVIEW=new Map(), REVDIRTY=false;
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
+/* Declared here rather than beside the rest of field mode: the map is built long
+   before that, and a const in its temporal dead zone throws on typeof rather
+   than reporting undefined. */
+const FIELD=window.matchMedia('(max-width:860px)').matches;
 
 /* ---------- reference data ---------------------------------------------------
    Counties, the SNBI inventory, HPMS and route extents are no longer pulled
@@ -1102,6 +1114,25 @@ const DEADHOST=new Set();          /* hosts this network has demonstrably blocke
    MapServer's export endpoint — the tile's own Web Mercator envelope, drawn to
    256x256. Slower than a cache, and worth it: it is the same host the bridge
    data comes from, so it cannot be blocked on a network where the tool works. */
+/* A tile layer that reads the device before the network. Field mode only — at a
+   desk there is a connection and a cache would only go stale. Defined here, with
+   the other layer types, because the base map is built before field mode's own
+   section is reached. */
+const CachedTiles=L.TileLayer.extend({
+  createTile:function(coords,done){
+    const img=document.createElement('img');
+    const url=this.getTileUrl(coords), id=this.options.cacheId||'x';
+    const fall=()=>{ img.onload=()=>done(null,img); img.onerror=e=>done(e,img); img.src=url; };
+    try{
+      idbGet(tileKey(id,coords)).then(blob=>{
+        if(blob&&blob.size){ img.onload=()=>done(null,img); img.src=URL.createObjectURL(blob); }
+        else fall();
+      }).catch(fall);
+    }catch(e){ fall(); }
+    return img;
+  }
+});
+
 const ExportLayer=L.TileLayer.extend({
   getTileUrl:function(c){
     const R=20037508.342789244, s=2*R/Math.pow(2,c.z);
@@ -1116,7 +1147,13 @@ function makeBase(key){
   const b=BASE[key];
   const o={maxZoom:19,maxNativeZoom:b.max,attribution:b.attr+' &middot; Data: NCDOT'};
   if(b.bounds) o.bounds=L.latLngBounds(b.bounds);     /* never request outside coverage */
-  const t=b.export? new ExportLayer('',Object.assign({svc:b.url},o)) : L.tileLayer(b.url,o);
+  /* In the field the tile layer reads the device first, so the map keeps drawing
+     where the signal does not. At a desk there is a connection and a cache would
+     only go stale. */
+  const t=b.export
+    ? new ExportLayer('',Object.assign({svc:b.url},o))
+    : (FIELD ? new CachedTiles(b.url,Object.assign({cacheId:key},o))
+             : L.tileLayer(b.url,o));
   t.on('tileload',()=>{ if(t===baseLayer) tileOK=true; });
   t.on('tileerror',()=>{
     if(tilesDead||t!==baseLayer||tileOK) return;      /* one good tile means the host is fine */
@@ -1180,15 +1217,20 @@ const labelLayer=L.layerGroup();
 let countyLayer=null;
 const canvas=L.canvas({padding:0.5});
 
-const pinCtl=L.control({position:'topright'});
-pinCtl.onAdd=function(){
-  const d=L.DomUtil.create('div','leaflet-bar pinctl');
-  d.innerHTML='<button id="pin" type="button" title="Click anywhere on the map to read the LRS route and milepoint there">'+
-    '<span class="pindot"></span>Pin drop</button>';
-  L.DomEvent.disableClickPropagation(d);
-  return d;
-};
-pinCtl.addTo(map);
+/* Top centre of the map, not a corner. The bridge panel opens over the right of
+   the map and the pin was underneath it — unreachable exactly when it is wanted,
+   because arming it from a feature card is the main way it gets used.
+
+   Not a Leaflet control: Leaflet's corner containers are zero-width, so left:50%
+   inside one resolves against nothing. This is attached to the map element
+   itself, which is the thing it should be centred on. */
+const pinBox=document.createElement('div');
+pinBox.className='pinctl pintop';
+pinBox.innerHTML='<button id="pin" type="button" title="Click anywhere on the map to read the LRS route and milepoint there">'+
+  '<span class="pindot"></span>Pin drop</button>';
+map.getContainer().appendChild(pinBox);
+L.DomEvent.disableClickPropagation(pinBox);
+L.DomEvent.disableScrollPropagation(pinBox);
 
 const legend=L.control({position:'bottomright'});
 legend.onAdd=function(){const d=L.DomUtil.create('div','maplegend');
@@ -2931,7 +2973,7 @@ const SRCTAG='<span class="srctag" title="Reviewer’s corrected value — this 
 const COLS=[
  {k:'BRDG_NBR',t:'Bridge',w:''},{k:'COUNTY',t:'County'},{k:'_sevlab',t:'Status'},
  {k:'_bh06',t:'BH06 route ID',mono:1},{k:'_declab',t:'Decoded'},
- {k:'MP',t:'BH07 milepoint',mono:1,num:1},{k:'_off',t:'Offset ft',mono:1,num:1},{k:'F_CARRIED',t:'Carried'},
+ {k:'MP',t:'BH07 LRS milepoint',mono:1,num:1},{k:'_off',t:'Offset ft',mono:1,num:1},{k:'F_CARRIED',t:'Carried'},
  {k:'FTR_INTRSC',t:'Crossed'},
  {k:'_rev',t:'Review'},{k:'_stype',t:'Structure type'},{k:'_cond',t:'Cond D/Su/Sb'},
  {k:'_fix',t:'Suggested BH06 / BH07',mono:1},{k:'_flaglab',t:'Findings'}];
@@ -3217,7 +3259,7 @@ function featurePanel(b){
           (f.named===false?'<div style="color:#C9A227;font-size:11.5px">measured here, not named in Feature Crossed</div>':'')+
           (d?'<div style="color:#5A5A5A;font-size:11.5px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
         '</dd>'+
-        '<dt>BH07</dt><dd class="mono">'+(n===null?(f.named&&!f.resolved
+        '<dt>BH07 <span style="font-weight:400;color:#9A9A9A">LRS</span></dt><dd class="mono">'+(n===null?(f.named&&!f.resolved
               ?'<span style="color:#5A5A5A">'+(b._featDone?'no LRS route found for this name':'not measured yet')+'</span>'
               :'<span style="color:#CF3910">not assigned</span>')
             :n.toFixed(3)+((rv.fix07!=null&&String(rv.fix07).trim()!=='')?SRCTAG:''))+
@@ -3309,7 +3351,7 @@ function drawDetail(b){
   }
   const rawMP=(b.MP==null||b.MP==='')?null:String(b.MP);
   const wasRounded=!rid7&&rawMP!==null&&rawMP!==fmtMP(b.MP);
-  h+='<div class="big"><div class="k">BH07 &mdash; LRS Milepoint '+
+  h+='<div class="big"><div class="k">BH07 &mdash; LRS milepoint '+
      '<span style="color:#9A9A9A;letter-spacing:.06em">'+(rid7?'reviewer’s correction':'reported, 3 dp')+
      '</span></div><div class="v">'+
      (b._mp3===null?'<span style="color:#CF3910">not assigned</span>':b._mp3.toFixed(3)+(rid7?SRCTAG:''))+'</div>'+
@@ -3320,7 +3362,8 @@ function drawDetail(b){
      (wasRounded?'<div class="d">NCDOT publishes <span class="mono" style="color:#1A1A1A">'+esc(rawMP)+
        '</span>, rounded here to the three decimals you report.</div>':'')+
      '<div class="d">'+(rl?('Route runs '+rl.min.toFixed(3)+' to '+rl.max.toFixed(3)+' in '+esc(b.COUNTY||'')+
-       ' County. Mileposts reset to zero at every county line — this is not the mile marker sign number.')
+       ' County, measured on NCDOT\u2019s LRS. Every milepoint in this tool is that measure: it resets to '+
+       'zero at each county line, and it is not the mile marker sign number and not an exit number.')
        :'Run Deep check to compare this against the route’s true extent in the county.')+'</div>'+
      (b._off!=null
        ?'<div class="d" style="border-top:1px solid #DDD;margin-top:8px;padding-top:7px;color:'+
@@ -3587,7 +3630,7 @@ async function pinAt(lat,lon){
     const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
     L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
       '<div class="pop-t">The road at this point</div>'+
-      '<div class="pop-k">LRS Route ID here</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
+      '<div class="pop-k">LRS route ID here</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
       (d?'<div class="pop-k" style="margin-top:2px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
       '<div class="pop-k" style="margin-top:7px">Milepoint here, on that route</div><div class="pop-v" style="font-size:15px">'+
         (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
@@ -3698,7 +3741,7 @@ async function diagnostics(){
 function exportCSV(){
   const cols=['BRDG_NBR','COUNTY','DIVISION','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','BH07_SOURCE_VALUE',
     'VALIDATED_BH06','VALIDATED_BH07','VALUE_SOURCE','ROUTE_DECODED',
-    'ROUTE_CLASS','INVENTORY_CODE','ROUTE_MIN_MP','ROUTE_MAX_MP','OFFSET_FT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
+    'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
@@ -3964,6 +4007,89 @@ function offlineApply(){
   return true;
 }
 
+/* ---- imagery and centrelines, around the day's bridges ---------------------
+   The county's records are small; its map is not. A county of aerial tiles runs
+   to hundreds of megabytes and its road network to fifty, so neither is worth
+   pulling whole. What an inspector actually needs is the ground around the
+   bridges they will stand at — a few hundred metres each — and that is a few
+   hundred kilobytes a bridge.
+
+   Tiles are stored as blobs and served back through a tile layer that looks in
+   the cache before the network, so the map keeps drawing when the signal goes.
+   Road centrelines come with their M values, because measuring a milepoint
+   offline is the point of having them. */
+const TILE_ZOOMS=[15,16,17,18], TILE_PAD_M=260;
+function tileRange(lat,lon,z,padM){
+  const n=Math.pow(2,z);
+  const mpp=156543.03392*Math.cos(lat*Math.PI/180)/n;      /* metres per pixel */
+  const padTiles=Math.max(1,Math.ceil(padM/(mpp*256)));
+  const x=Math.floor((lon+180)/360*n);
+  const la=lat*Math.PI/180;
+  const y=Math.floor((1-Math.log(Math.tan(la)+1/Math.cos(la))/Math.PI)/2*n);
+  const out=[];
+  for(let dx=-padTiles;dx<=padTiles;dx++) for(let dy=-padTiles;dy<=padTiles;dy++)
+    out.push({z,x:x+dx,y:y+dy});
+  return out;
+}
+const tileKey=(id,c)=>'tile:'+id+':'+c.z+'/'+c.x+'/'+c.y;
+
+async function cacheAround(list,onProgress){
+  const key=(typeof baseKey!=='undefined'&&baseKey)||'esri_imagery';
+  const src=BASE[key];
+  if(!src||src.export) return {tiles:0,roads:0,bytes:0};
+  let tiles=0, roads=0, bytes=0;
+  for(let i=0;i<list.length;i++){
+    const b=list[i];
+    if(!b.LAT_DD) continue;
+    /* imagery */
+    for(const z of TILE_ZOOMS){
+      for(const c of tileRange(b.LAT_DD,b.LONG_DD,z,TILE_PAD_M)){
+        const k=tileKey(key,c);
+        try{
+          if(await idbGet(k)) continue;
+          const u=src.url.replace('{z}',c.z).replace('{x}',c.x).replace('{y}',c.y);
+          const r=await fetch(u);
+          if(!r.ok) continue;
+          const blob=await r.blob();
+          await idbPut(k,blob); tiles++; bytes+=blob.size;
+        }catch(e){}
+      }
+    }
+    /* centrelines, with the measures on them */
+    try{
+      const j=await esriQuery(ROADCHAR,{
+        geometry:b.LONG_DD+','+b.LAT_DD, geometryType:'esriGeometryPoint', inSR:'4326',
+        distance:'1200', units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
+        outFields:'RouteID,RouteName,StreetName,Direction',
+        returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:400});
+      await idbPut('roads:'+b.BRDG_NBR,j);
+      roads++; bytes+=JSON.stringify(j).length;
+    }catch(e){}
+    if(onProgress) onProgress(i+1,list.length,bytes);
+  }
+  return {tiles,roads,bytes};
+}
+
+/* Which bridges is the inspector likely to stand at today? The ones near them.
+   Not the county — a county of imagery is not a download anybody waits for. */
+const FIELD_RADIUS_MI=3, FIELD_MAX=30;
+function bridgesNearMe(){
+  if(!MYPOS) return [];
+  return ALL.filter(b=>b.LAT_DD)
+    .map(b=>({b,ft:ftBetweenLL(MYPOS,[b.LAT_DD,b.LONG_DD])}))
+    .filter(x=>x.ft<=FIELD_RADIUS_MI*5280)
+    .sort((a,b)=>a.ft-b.ft).slice(0,FIELD_MAX).map(x=>x.b);
+}
+async function cacheMyArea(){
+  const list=bridgesNearMe();
+  if(!list.length){ fbAside('no bridges within '+FIELD_RADIUS_MI+' miles to save',6000); return; }
+  fbAside('saving the map around '+list.length+' bridges…');
+  const out=await cacheAround(list,(n,t,bytes)=>
+    fbAside('map '+n+'/'+t+' — '+Math.round(bytes/1024/1024*10)/10+' MB'));
+  fbAside(out.tiles.toLocaleString()+' tiles and '+out.roads+' road sets saved, '+
+          Math.round(out.bytes/1024/1024*10)/10+' MB',9000);
+}
+
 /* ==========================================================================
    THE PROPOSAL QUEUE
    Anything captured in the field is a PROPOSED value: recorded, attributed and
@@ -4029,7 +4155,6 @@ window.addEventListener('online',()=>flushProposals());
    opposite things: no checklist of potential problems, no severity colouring to
    read, no table in the way, and the bridge they are standing at already open.
    ========================================================================== */
-const FIELD=window.matchMedia('(max-width:860px)').matches;
 if(FIELD){ document.body.classList.add('pane-map','field'); }
 
 /* The bar has one line and two things want it: which bridge you are at, and
@@ -4087,7 +4212,11 @@ async function onLocated(auto){
       } else { fbState('Offline, and no copy of '+nice1(cty)+' is saved on this phone'); }
     } else {
       await openCounty(cty);
-      cacheCounty(cty);
+      await cacheCounty(cty);
+      /* The records are down; now the ground around the bridges they are near.
+         Deliberately not the county — a county of imagery is not a download
+         anybody waits for. */
+      cacheMyArea();
     }
   }
   if(ALL.length&&!ALL[0]._twins) twinScan();
@@ -4169,6 +4298,7 @@ async function openCounty(cty){
 if(FIELD){
   $('fb-here').onclick=()=>locateMe(true);
   $('fb-table').onclick=()=>sheet(!document.body.classList.contains('sheet'));
+  $('fb-save').onclick=()=>cacheMyArea();
   /* Ask once, on open. If they decline, everything still works by search. */
   setTimeout(()=>locateMe(true),1200);
 }

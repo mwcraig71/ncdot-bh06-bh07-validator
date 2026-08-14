@@ -181,6 +181,45 @@ const mk=async(b,opts={})=>{
   ok('the SNBI join survives too',off.snbi>0,true);
   ok('and so do the route extents the deep check needs',off.extents>0,true);
 
+  console.log('\n10. The map around the day\'s bridges comes down too');
+  const tiles=[];
+  await p.route('**/*.arcgisonline.com/**',r=>{tiles.push(r.request().url());
+    return r.fulfill({contentType:'image/png',body:Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8//9/PQAJewN9nQAyAQAAAABJRU5ErkJggg==','base64')});});
+  ok('a save-map control is on the bar',await p.evaluate(()=>!!document.getElementById('fb-save')),true);
+  const near=await p.evaluate(()=>bridgesNearMe().map(b=>b.BRDG_NBR));
+  console.log('   bridges within 3 miles of the fix: '+near.join(', '));
+  ok('it picks the bridges near the inspector, not the county',near.length>0&&near.length<=30,true);
+  /* the automatic pass already ran when the county came down, so start clean to
+     see what one bridge actually costs */
+  await p.evaluate(async()=>{ const d=await idb();
+    await new Promise(r=>{const t=d.transaction('cache','readwrite');
+      t.objectStore('cache').clear(); t.oncomplete=r; t.onerror=r;}); });
+  const out=await p.evaluate(async()=>await cacheAround(
+    ALL.filter(b=>b.BRDG_NBR==='590819'),null));
+  console.log('   one bridge from cold: '+out.tiles+' tiles, '+out.roads+' road set, '+
+              Math.round(out.bytes/1024)+' KB');
+  ok('imagery was fetched and stored',out.tiles>0,true);
+  const again=await p.evaluate(async()=>await cacheAround(
+    ALL.filter(b=>b.BRDG_NBR==='590819'),null));
+  ok('running it again downloads nothing it already holds',again.tiles,0);
+  ok('...at several zooms, so it is usable when you walk about',
+     await p.evaluate(()=>TILE_ZOOMS.length>=3),true);
+  ok('centrelines came with it',out.roads,1);
+  ok('the roads carry their measures, so a milepoint can be read offline',
+     await p.evaluate(async()=>{const j=await idbGet('roads:590819');
+       const g=(j.features||[])[0]&&(j.features||[])[0].geometry;
+       return !!(g&&g.paths&&g.paths[0]&&g.paths[0][0].length>2);}),true);
+  ok('a tile is on the device, not just in memory',
+     await p.evaluate(async()=>{
+       const k=Object.keys(localStorage); /* not localStorage — IndexedDB */
+       const c=tileRange(ALL.find(b=>b.BRDG_NBR==='590819').LAT_DD,
+                         ALL.find(b=>b.BRDG_NBR==='590819').LONG_DD,16,260)[0];
+       const blob=await idbGet(tileKey(baseKey,c));
+       return !!(blob&&blob.size);}),true);
+  ok('the field tile layer reads the device before the network',
+     await p.evaluate(()=>baseLayer instanceof CachedTiles),true);
+
   console.log('\npage errors: '+JSON.stringify(errs));
   await b.close();
 })();

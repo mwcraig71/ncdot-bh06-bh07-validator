@@ -104,7 +104,7 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **74** features, **21** columns, **41** field — 262 in all.
+corrections, **37** auth, **74** features, **21** columns, **50** field — 271 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.
