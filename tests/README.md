@@ -1,6 +1,6 @@
 # Tests
 
-Six Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
+Seven Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
 service and all six tile hosts — so none of them needs network access, and none of
 them can pass because a live service happened to answer.
 
@@ -12,6 +12,7 @@ node tests/corrections.test.js dist/NCDOT_BH06_BH07_Validator.html
 node tests/auth.test.js        dist/NCDOT_BH06_BH07_Validator.html
 node tests/features.test.js    dist/NCDOT_BH06_BH07_Validator.html
 node tests/columns.test.js     dist/NCDOT_BH06_BH07_Validator.html
+node tests/field.test.js       dist/NCDOT_BH06_BH07_Validator.html
 ```
 
 Each takes a build as its argument and should pass on all three: `dist/`, the
@@ -87,13 +88,23 @@ nothing recorded), that a half-typed comparison hides nothing, that `!` excludes
 that filters combine, and that the CSV exports what is on screen rather than the
 whole view.
 
-`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all six. It
+`field.test.js` runs at 390x844 with touch and a geolocation fix 120 ft from a real
+structure. It asserts what field mode removes — the filter panel, the tab strip, the
+severity legend — and what it adds: a table that starts off screen and slides up from
+the bar, a bridge already open because the phone knew where it was, a panel that leads
+with BH06 and BH07 and ends with the paperwork, and Add new feature arming the pin at
+the feature it just created. Then the part that matters most in a field app: a
+submission is queued rather than applied, it survives the page closing because it is in
+localStorage, and it goes out when the connection returns. The county itself round-trips
+through IndexedDB and every structure validates again with the network switched off.
+
+`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all seven. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **74** features, **21** columns — 221 in all.
+corrections, **37** auth, **74** features, **21** columns, **41** field — 262 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

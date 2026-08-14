@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&family=Open+Sans:wght@300;400;600;700&display=swap">
 <style>
-:root{
+:root{--fbh:56px;
   --orange:#CF3910; --orange-dark:#A82C08; --orange-tint:#FBE7DF;
   --black:#1A1A1A; --navy:#003388; --navy-dark:#002466;
   --gray:#313131; --gray-2:#5A5A5A; --gray-3:#9A9A9A;
@@ -254,6 +254,25 @@ body.on-imagery .cntylab{color:#fff;
   .tb-note{width:100%;order:9}
 
   .mtabs{display:flex;flex:0 0 auto;border-bottom:1px solid var(--line);background:#fff}
+  /* Field mode hides the tab strip entirely — there is nothing to switch to
+     until the inspector asks for it. */
+  body.field .mtabs{display:none}
+  body.field #fieldbar{display:flex}
+  body.field main > #side{display:none !important}
+  body.field.pane-tablewrap main > #content{display:flex}
+  /* The results are a sheet that slides up from the bar, never a pane that
+     replaces the map. Its own height plus the bar is what it travels. */
+  body.field #tablewrap{position:fixed;left:0;right:0;bottom:var(--fbh);top:auto;height:58vh;z-index:1200;
+    background:#fff;border-top:3px solid var(--orange);box-shadow:0 -8px 26px rgba(0,0,0,.22);
+    transform:translateY(calc(100% + var(--fbh)));transition:transform .22s ease;
+    display:flex !important;flex-direction:column;overflow:hidden}
+  body.field.sheet #tablewrap{transform:translateY(0)}
+  body.field #map{display:flex !important}
+  body.field #tablewrap .tbar{flex:0 0 auto}
+  body.field #tscroll{flex:1 1 auto;overflow:auto}
+  /* The bar is the one thing that must never be covered — it is how you get
+     back. The drawer stops above it rather than under it. */
+  body.field #drawer{bottom:var(--fbh);height:auto;top:0}
   .mtabs button{flex:1;padding:12px 4px;background:#fff;border:0;border-bottom:3px solid transparent;
     font-family:var(--font-h);font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:var(--gray-2)}
   .mtabs button.on{color:var(--orange);border-bottom-color:var(--orange)}
@@ -293,6 +312,28 @@ body.on-imagery .cntylab{color:#fff;
   .leaflet-control-zoom a{width:34px;height:34px;line-height:34px}
   .pinctl button{padding:11px 14px;font-size:12px}
 }
+/* Tap targets, not links. The same control has to work under a thumb in the
+   field and beside a mouse at a desk. */
+.pinbtn{display:inline-flex;align-items:center;gap:8px;text-decoration:none;
+  background:#EAF0FA;color:#1E56B3;border:1px solid #C6D6EE;border-radius:22px;
+  padding:9px 15px;font-family:var(--font-h);font-size:12px;letter-spacing:.06em;text-transform:uppercase}
+.pinbtn:active{background:#1E56B3;color:#fff}
+.pinbtn .pi{font-size:17px;line-height:1}
+.pinbtn.addf{background:#FDEEE9;color:var(--orange);border-color:#F3C9BB}
+.pinbtn.armed{background:var(--orange);color:#fff;border-color:var(--orange)}
+@media (max-width:860px){
+  .pinbtn{width:100%;justify-content:center;padding:13px 15px;font-size:13px}
+}
+#fieldbar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:1600;
+  align-items:center;gap:10px;padding:8px 12px calc(8px + env(safe-area-inset-bottom));
+  background:var(--black);color:#fff;font-family:var(--font-h);font-size:12px;letter-spacing:.06em}
+#fieldbar button{background:#2A2A2A;color:#fff;border:0;border-radius:20px;padding:10px 16px;
+  font-family:var(--font-h);font-size:12px;letter-spacing:.08em;text-transform:uppercase}
+#fieldbar button:active{background:var(--orange)}
+#fb-state{flex:1;font-size:11px;letter-spacing:.02em;color:#C8C8C8;text-transform:none;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.field #drawer{z-index:1200}
+body.field.sheet #fieldbar{background:var(--orange)}
 @media (max-width:520px){
   .hdr-t h1{font-size:12.5px}
   .tiles{grid-template-columns:1fr 1fr}
@@ -368,10 +409,18 @@ body.on-imagery .cntylab{color:#fff;
 </div>
 
 <nav class="mtabs">
-  <button data-pane="side">Filters</button>
   <button data-pane="map" class="on">Map</button>
+  <button data-pane="side">Filters</button>
   <button data-pane="tablewrap">Results</button>
 </nav>
+<!-- Field mode. An inspector standing under a bridge wants the bridge, not the
+     checklist: the filter panel and the results table are both out of the way,
+     the table on a tab they can pull up when they want it. -->
+<div id="fieldbar">
+  <button id="fb-here" title="Centre on me">&#9678; <span>Here</span></button>
+  <span id="fb-state"></span>
+  <button id="fb-table" title="Show the results table">Bridges &#9650;</button>
+</div>
 
 <main>
   <aside id="side">
@@ -1146,7 +1195,7 @@ legend.onAdd=function(){const d=L.DomUtil.create('div','maplegend');
   d.innerHTML='<b>BH06 / BH07 status</b>'+
    ['e','w','i','ok'].map(s=>'<span><i class="sw" style="background:'+SEVCOL[s]+'"></i>'+SEVNAME[s]+'</span>').join('');
   return d;};
-legend.addTo(map);
+if(!window.matchMedia('(max-width:860px)').matches) legend.addTo(map);
 
 /* County boundaries, names and the SAP/FIPS crosswalk — one read of a view that
    hands back GeoJSON, instead of a live NCDOT call on every page load. The
@@ -1189,10 +1238,16 @@ function drawPoints(){
   const pts=VIEW.filter(b=>b.LAT_DD&&b.LONG_DD);
   const big=pts.length>4000;
   pts.forEach(b=>{
+    /* Field mode draws every structure the same. An inspector is looking for
+       the bridge they are at, not for the ones with findings — and a map full
+       of red dots invites reading a verdict off a colour before anyone has
+       looked at the bridge. */
+    const fieldPin=typeof FIELD!=='undefined'&&FIELD;
     const m=L.circleMarker([b.LAT_DD,b.LONG_DD],{renderer:canvas,
-      radius: (b._esev||b._sev)==='ok'? (big?2.6:4) : (big?3.4:5.6),
-      color:'#fff', weight: big?0.6:1.2,
-      fillColor:SEVCOL[b._esev||b._sev], fillOpacity:(b._esev||b._sev)==='ok'?.75:.95});
+      radius: fieldPin? 6 : ((b._esev||b._sev)==='ok'? (big?2.6:4) : (big?3.4:5.6)),
+      color:'#fff', weight: fieldPin?1.6:(big?0.6:1.2),
+      fillColor: fieldPin? '#1A1A1A' : SEVCOL[b._esev||b._sev],
+      fillOpacity: fieldPin? .9 : ((b._esev||b._sev)==='ok'?.75:.95)});
     m.on('click',()=>select(b.BRDG_NBR,false));
     m.bindTooltip(b.BRDG_NBR+' — '+(b._rid||'no route')+' @ '+(b._mp3===null?'—':b._mp3.toFixed(3))+
       (b._src==='REVIEWED'?'  (reviewed)':''),{sticky:true});
@@ -3191,12 +3246,22 @@ function featurePanel(b){
       /* The manual way in, for the ones nothing automatic can settle: point at
          the road on the map and let NCDOT's own tool answer. */
       (f.loc==='B'&&(!f.rid||!/^\d{11}$/.test(f.rid))
-        ? '<div style="font-size:11.5px;margin-top:5px"><a href="#" class="pinf" data-des="'+esc(f.des)+
-          '">Pick this roadway on the map</a> &mdash; arms the pin, then click the road '+
-          (f.name?'(<b>'+esc(f.name)+'</b>) ':'')+'where it passes under the bridge.</div>'
+        ? '<div style="margin-top:6px"><a href="#" class="pinf pinbtn" data-des="'+esc(f.des)+
+          '" title="Pick this roadway on the map"><span class="pi">&#9678;</span>'+
+          '<span class="pl">Pick this roadway on the map</span></a>'+
+          '<div style="font-size:11.5px;color:#5A5A5A;margin-top:3px">Arms the pin, then tap the road '+
+          (f.name?'(<b>'+esc(f.name)+'</b>) ':'')+'where it passes under the bridge.</div></div>'
         : '')+
     '</div>';
   });
+  /* Everything NCDOT holds, plus everything measured, and then the one thing
+     neither can supply: a roadway the inspector can see and the data cannot. */
+  h+='<div style="margin-top:10px"><a href="#" id="addfeat" class="pinbtn addf">'+
+     '<span class="pi">+</span><span class="pl">Add new feature</span></a>'+
+     '<div style="font-size:11.5px;color:#5A5A5A;margin-top:4px">'+
+     'For a roadway under this structure that is not listed. You pick it on the map; '+
+     'its route and milepoint are measured from where you tap, and it goes to an approver '+
+     'before it reaches anything.</div></div>';
   return h;
 }
 
@@ -3211,8 +3276,8 @@ function drawDetail(b){
   $('dr-title').innerHTML='<h2>'+esc(b.BRDG_NBR)+'</h2><div class="s">'+esc(b.COUNTY||'')+
     ' County &middot; Division '+esc(b.DIVISION||'—')+'</div>';
   const rv=REVIEW.get(b.BRDG_NBR)||{status:'',note:'',fix06:'',fix07:'',cleared:{},by:'',ts:0};
-  let h='';
-  h+='<div class="revbox">'+
+  let h='', revHtml='';
+  revHtml+='<div class="revbox">'+
     '<div class="revrow"><label>Status</label><select id="rv-status">'+
       RSTATUS.map(s=>'<option value="'+s[0]+'"'+(rv.status===s[0]?' selected':'')+'>'+s[1]+'</option>').join('')+
     '</select></div>'+
@@ -3223,6 +3288,11 @@ function drawDetail(b){
       esc(rv.note||'')+'</textarea>'+
     '<div class="revmeta">'+(rv.ts?('last edited '+new Date(rv.ts).toLocaleString()+(rv.by?' by '+esc(rv.by):'')):'not reviewed yet')+
     (b._fix&&b._fix.verdict==='fix'?' &middot; <a href="#" id="rv-take">use the suggested correction</a>':'')+'</div></div>';
+  /* Field mode puts the numbers first and the paperwork last. Someone standing
+     at the bridge wants BH06 and BH07 before anything else; status, notes and
+     corrections belong after every feature, where they are still reachable but
+     not in the way. */
+  if(!FIELD) h+=revHtml;
   h+='<div class="big"><div class="k">BH06 &mdash; LRS Route ID'+
      (rid6?' <span style="color:#9A9A9A;letter-spacing:.06em">reviewer’s correction</span>':'')+
      '</div><div class="v">'+
@@ -3366,6 +3436,7 @@ function drawDetail(b){
     '<button class="btn ghost" onclick="zoomTo(\''+esc(b.BRDG_NBR)+'\')">Zoom to bridge</button>'+
     (b.LAT_DD?'<button class="btn ghost" onclick="pinAt('+b.LAT_DD+','+b.LONG_DD+')">Re-measure from GIS</button>':'')+
     '</div>';
+  if(FIELD) h+='<div class="dr-sec">Review</div>'+revHtml;
   $('dr-body').innerHTML=h;
 
   /* --- review editor bindings --- */
@@ -3382,6 +3453,24 @@ function drawDetail(b){
   /* Corrections on the other features. Same rule as the primary one: the value
      is re-tested the moment it changes, so a correction that is itself wrong
      fails in front of the person who typed it. */
+  const af=$('addfeat');
+  if(af) af.onclick=e=>{
+    e.preventDefault();
+    const bb=ALL.find(x=>x.BRDG_NBR===bn)||b;
+    const list=featuresOf(bb);
+    const f={des:'', loc:'B', primary:false, name:'', rid:null, mp:null,
+             origin:'added in the field by '+(reviewerName()||'a reviewer'),
+             named:false, added:true, resolved:false, _ord:900+list.length,
+             confidence:'low', routes:[]};
+    list.push(f);
+    bb._feat=renumberFeatures(list);
+    rollUpFeatures(bb); drawDetail(bb);
+    PINTARGET={bn, des:f.des};
+    if(!pinMode) $('pin').click();
+    toast('Feature '+f.des+' added. Tap the roadway on the map where it passes under '+bn+
+          ' — its route and milepoint are measured from that point, and it goes to an approver.',10000);
+    if(FIELD) sheet(false);
+  };
   $('dr-body').querySelectorAll('a.pinf').forEach(a=>a.onclick=e=>{
     e.preventDefault();
     PINTARGET={bn, des:a.dataset.des};
@@ -3481,8 +3570,17 @@ async function pinAt(lat,lon){
         f.why='Measured by NCDOT\u2019s own route/milepost tool at a point a reviewer chose on the map.';
         f.routes=routesFor(f.name||at.RouteName||'',at.RID);
         rollUpFeatures(sel); revalidate(); applyFilters(); drawDetail(sel);
-        toast('Feature '+f.des+' on bridge '+sel.BRDG_NBR+' set to '+at.RID+' at '+
-              Number(at.MEAS).toFixed(3)+'. Check it against the road you meant before exporting.',10000);
+        /* In the field this is a submission, not an edit: it goes to the queue
+           and decides nothing until somebody with the authority accepts it. */
+        if(FIELD){
+          submitProposal(sel.BRDG_NBR,f.des,'BH06',at.RID,f.name||at.RouteName||'');
+          submitProposal(sel.BRDG_NBR,f.des,'BH07',Number(at.MEAS).toFixed(3),f.name||'');
+          toast('Feature '+f.des+' recorded as '+at.RID+' at '+Number(at.MEAS).toFixed(3)+
+                ' and queued for approval. Check it against the road you meant.',10000);
+        } else {
+          toast('Feature '+f.des+' on bridge '+sel.BRDG_NBR+' set to '+at.RID+' at '+
+                Number(at.MEAS).toFixed(3)+'. Check it against the road you meant before exporting.',10000);
+        }
       }
       PINTARGET=null;
     }
@@ -3785,7 +3883,295 @@ document.querySelectorAll('.mtabs button').forEach(t=>t.onclick=()=>{
   document.body.className=document.body.className.replace(/\bpane-\S+/g,'').trim()+' pane-'+t.dataset.pane;
   setTimeout(()=>{ try{ map.invalidateSize(); }catch(e){} },60);
 });
-if(window.matchMedia('(max-width:860px)').matches) document.body.classList.add('pane-map');
+/* ==========================================================================
+   WORKING OFFLINE
+   Cell coverage under a bridge is not a thing anyone should plan around. The
+   county's records are small — Mecklenburg is 1,282 structures, 22,920 route
+   extents and 15,688 HPMS routes, about 4 MB — so they come down whole the
+   moment an inspector opens a county, and every read falls back to them when
+   the connection does not answer.
+
+   IndexedDB rather than localStorage: 4 MB is at the edge of what localStorage
+   will hold, and losing a county's cache halfway through a day because a quota
+   was hit is precisely the failure this is meant to prevent. The pending
+   submissions stay in localStorage, because they are small and they must
+   survive even a broken cache.
+
+   What is NOT cached here is imagery and road centrelines. A county of aerial
+   tiles is hundreds of megabytes and its road network is another fifty, so
+   those are fetched around the structures the inspector is actually near.
+   ========================================================================== */
+const IDBNAME='bh0607', IDBSTORE='cache';
+function idb(){
+  return new Promise((res,rej)=>{
+    if(!window.indexedDB) return rej(new Error('no IndexedDB'));
+    const r=indexedDB.open(IDBNAME,1);
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDBSTORE)) r.result.createObjectStore(IDBSTORE); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error);
+  });
+}
+async function idbPut(k,v){ const d=await idb(); return new Promise((res,rej)=>{
+  const t=d.transaction(IDBSTORE,'readwrite'); t.objectStore(IDBSTORE).put(v,k);
+  t.oncomplete=()=>res(true); t.onerror=()=>rej(t.error); }); }
+async function idbGet(k){ const d=await idb(); return new Promise((res,rej)=>{
+  const t=d.transaction(IDBSTORE,'readonly'); const q=t.objectStore(IDBSTORE).get(k);
+  q.onsuccess=()=>res(q.result); q.onerror=()=>rej(q.error); }); }
+
+let OFFLINE=null;                 /* the county held on this device, once loaded */
+
+async function cacheCounty(cty){
+  if(!cty) return null;
+  const sap=COUNTIES[cty];
+  if(!sap) return null;
+  fbAside('saving to this phone…');
+  try{
+    const [snbi,extents,hpms,counties]=await Promise.all([
+      sbAll('structure_snbi?select=*&county_name=in.'+sbIn([cty])),
+      sbAll('route_extents?select=route_id,min_mp,max_mp&route_id=like.*'+sap),
+      sbAll('hpms_routes?select=route_id,begin_point,end_point&hpms_year=eq.'+HPMSYEAR+
+            '&county_id=eq.'+(SAP2FIPS[sap]==null?-1:SAP2FIPS[sap])),
+      sbAll('county_geojson?select=county_name,sap_code,fips_code,dot_division,geom')
+    ]);
+    const bundle={county:cty, at:Date.now(),
+      bridges:ALL.map(b=>{const o={};
+        ['BRDG_NBR','COUNTY','DIVISION','ROUTE','RTE_ID','MP','F_CARRIED','FTR_INTRSC','SERVICEON',
+         'SERVICEUNDER','RD_ANGLE','MAINT_RESP','FUNC_CLASS','LAT_DD','LONG_DD','BRDG_TYP_NM','AADT']
+          .forEach(k=>o[k]=b[k]); return o;}),
+      snbi, extents, hpms, counties};
+    await idbPut('county:'+cty,bundle);
+    OFFLINE=bundle;
+    const kb=Math.round(JSON.stringify(bundle).length/1024);
+    fbAside('saved, '+(kb>1024?(kb/1024).toFixed(1)+' MB':kb+' KB')+' on this phone',6000);
+    return bundle;
+  }catch(e){ fbAside('could not save for offline: '+(e.message||e),9000); return null; }
+}
+async function loadCachedCounty(cty){
+  try{ const b=await idbGet('county:'+cty); if(b){ OFFLINE=b; return b; } }catch(e){}
+  return null;
+}
+/* Apply what is on the device in place of the reads that cannot be made. */
+function offlineApply(){
+  if(!OFFLINE) return false;
+  (OFFLINE.counties||[]).forEach(r=>{
+    const nm=(r.county_name||'').toUpperCase();
+    COUNTIES[nm]=r.sap_code;
+    if(r.fips_code!=null) SAP2FIPS[r.sap_code]=Number(r.fips_code);
+  });
+  SNBI=new Map(); (OFFLINE.snbi||[]).forEach(r=>SNBI.set(String(r.structure_number).trim(),r));
+  (OFFLINE.extents||[]).forEach(r=>{ ROUTELEN[r.route_id]={min:Number(r.min_mp),max:Number(r.max_mp)}; });
+  HPMS=new Map(); (OFFLINE.hpms||[]).forEach(r=>HPMS.set(r.route_id,{mn:r.begin_point,mx:r.end_point}));
+  DEEP=true;
+  return true;
+}
+
+/* ==========================================================================
+   THE PROPOSAL QUEUE
+   Anything captured in the field is a PROPOSED value: recorded, attributed and
+   visible, deciding nothing until a designated approver accepts it. That is a
+   source below PUBLISHED in the database, so an unapproved number cannot reach
+   a check or an export however the tool is used.
+
+   Offline, a proposal cannot be sent. It is held here and flushed when the
+   connection comes back. This is the one place the tool keeps state in the
+   browser, and it is deliberate: the alternative is losing an inspector's work
+   when the phone sleeps. Everything else still lives in the review file.
+   ========================================================================== */
+const PENDKEY='bh0607.pending.v1';
+function pendLoad(){ try{ return JSON.parse(localStorage.getItem(PENDKEY)||'[]'); }catch(e){ return []; } }
+function pendSave(q){ try{ localStorage.setItem(PENDKEY,JSON.stringify(q)); }catch(e){} }
+function pendCount(){ return pendLoad().length; }
+
+async function submitProposal(bn,des,field,value,note){
+  const item={bn,des,field,value,note:note||'',by:reviewerName()||'',at:Date.now()};
+  const q=pendLoad(); q.push(item); pendSave(q);
+  updatePending();
+  flushProposals();
+}
+
+let FLUSHING=false;
+async function flushProposals(){
+  if(FLUSHING) return;
+  const q=pendLoad();
+  if(!q.length) return;
+  if(!navigator.onLine){ updatePending('offline'); return; }
+  if(!signedIn()){ updatePending('sign in to send'); return; }
+  FLUSHING=true;
+  const left=[];
+  for(const it of q){
+    try{
+      const r=await fetch(SB_URL+'/rest/v1/rpc/propose_value',{
+        method:'POST',
+        headers:{apikey:SB_KEY, Authorization:'Bearer '+SESSION.token,
+                 'Content-Type':'application/json'},
+        body:JSON.stringify({p_structure:it.bn, p_designation:it.des,
+                             p_field:it.field, p_value:String(it.value), p_note:it.note})});
+      if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,120));
+    }catch(e){ it.err=String(e.message||e); left.push(it); }
+  }
+  pendSave(left);
+  FLUSHING=false;
+  updatePending();
+  if(!left.length&&q.length) toast(q.length.toLocaleString()+' submission'+(q.length===1?'':'s')+
+    ' sent for approval. They change nothing until an approver accepts them.',8000);
+}
+function updatePending(msg){
+  const n=pendCount();
+  const el=$('fb-state');
+  if(el&&FIELD&&n) el.textContent=n+' waiting to send'+(msg?' — '+msg:'');
+  const d=$('penddot'); if(d) d.style.display=n?'inline-block':'none';
+}
+window.addEventListener('online',()=>flushProposals());
+
+/* ==========================================================================
+   FIELD MODE
+   The desktop tool is for someone working a county at a desk. This is for
+   someone standing under a bridge with one hand free, and the two want almost
+   opposite things: no checklist of potential problems, no severity colouring to
+   read, no table in the way, and the bridge they are standing at already open.
+   ========================================================================== */
+const FIELD=window.matchMedia('(max-width:860px)').matches;
+if(FIELD){ document.body.classList.add('pane-map','field'); }
+
+/* The bar has one line and two things want it: which bridge you are at, and
+   what the download is doing. The bridge wins — it is why you are here — and
+   the download appends and then gets out of the way. */
+let FBMAIN='';
+function fbState(msg){ FBMAIN=msg||''; const el=$('fb-state'); if(el) el.textContent=FBMAIN; }
+function fbAside(msg,holdMs){
+  const el=$('fb-state'); if(!el) return;
+  el.textContent=FBMAIN?(FBMAIN+'  ·  '+msg):msg;
+  if(holdMs) setTimeout(()=>{ if(el.textContent.indexOf(msg)>=0) el.textContent=FBMAIN; },holdMs);
+}
+function sheet(open){
+  document.body.classList.toggle('sheet',open!==false);
+  const b=$('fb-table'); if(b) b.innerHTML=document.body.classList.contains('sheet')
+    ? 'Bridges &#9660;' : 'Bridges &#9650;';
+}
+
+/* ---- where the inspector is ------------------------------------------------
+   Centre on them, open the structure they are standing at, and start caching
+   the county underneath them. A bridge inspection begins at a bridge, so the
+   app should too. */
+let MYPOS=null, MYMARK=null;
+const ftBetweenLL=(a,b)=>{
+  const dy=(a[0]-b[0])*364000, dx=(a[1]-b[1])*364000*Math.cos(a[0]*Math.PI/180);
+  return Math.hypot(dx,dy);
+};
+const NEAR_FT=300;                 /* close enough to be the bridge you are at */
+
+function locateMe(auto){
+  if(!navigator.geolocation){ fbState('This device reports no location.'); return; }
+  fbState('Finding you…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    MYPOS=[pos.coords.latitude,pos.coords.longitude];
+    if(MYMARK) try{ map.removeLayer(MYMARK); }catch(e){}
+    MYMARK=L.circleMarker(MYPOS,{radius:7,color:'#fff',weight:2,fillColor:'#1E56B3',fillOpacity:1})
+      .addTo(map).bindTooltip('You are here');
+    map.setView(MYPOS, Math.max(map.getZoom(),17));
+    onLocated(auto);
+  },err=>{
+    fbState(err.code===1?'Location permission refused.':'Could not get a location fix.');
+  },{enableHighAccuracy:true,timeout:12000,maximumAge:30000});
+}
+
+async function onLocated(auto){
+  const cty=countyAt(MYPOS);
+  fbState(cty?('You are in '+nice1(cty)+' County'):'Located');
+  if(auto&&cty){
+    if(!navigator.onLine){
+      /* No signal: work from whatever this phone already holds. */
+      const held=await loadCachedCounty(cty);
+      if(held){ ALL=held.bridges.map(x=>Object.assign({},x)); offlineApply();
+        revalidate(); populateFilters(); applyFilters(); drawPoints();
+        fbState('Offline — working from the copy of '+nice1(cty)+' saved on this phone');
+      } else { fbState('Offline, and no copy of '+nice1(cty)+' is saved on this phone'); }
+    } else {
+      await openCounty(cty);
+      cacheCounty(cty);
+    }
+  }
+  if(ALL.length&&!ALL[0]._twins) twinScan();
+  const near=nearestStructure(MYPOS);
+  if(near&&near.ft<=NEAR_FT){
+    /* Sister decks sit 40 to 120 ft apart, which is inside the accuracy of a
+       phone fix — so "nearest" is not a safe answer at a twin pair. Open the
+       nearer one, but say the other is there, because standing between two
+       decks and being handed the wrong one silently is how a correction ends up
+       on the wrong bridge number. */
+    const twin=(near.b._twins||[])[0];
+    let alt=null;
+    if(twin){ const o=ALL.find(x=>x.BRDG_NBR===twin.bn);
+      if(o&&o.LAT_DD) alt={bn:o.BRDG_NBR, ft:Math.round(ftBetweenLL(MYPOS,[o.LAT_DD,o.LONG_DD]))}; }
+    fbState(near.b.BRDG_NBR+' — '+Math.round(near.ft)+' ft'+
+      (alt?'  ·  sister '+alt.bn+' is '+alt.ft+' ft — check which deck':''));
+    select(near.b.BRDG_NBR,true);
+    if(alt) toast('You are between two sister decks: '+near.b.BRDG_NBR+' at '+Math.round(near.ft)+
+      ' ft and '+alt.bn+' at '+alt.ft+' ft. '+near.b.BRDG_NBR+' is open — check the bridge number '+
+      'on the structure before recording anything.',12000);
+  } else if(near){
+    fbState('Nearest bridge '+near.b.BRDG_NBR+', '+Math.round(near.ft/5280*10)/10+' mi away');
+  }
+}
+const nice1=s=>String(s||'').toLowerCase().replace(/\b[a-z]/g,c=>c.toUpperCase());
+function nearestStructure(ll){
+  let best=null;
+  ALL.forEach(b=>{ if(!b.LAT_DD) return;
+    const d=ftBetweenLL(ll,[b.LAT_DD,b.LONG_DD]);
+    if(best===null||d<best.ft) best={ft:d,b};});
+  return best;
+}
+/* Which county am I standing in? The boundaries are already loaded for the map,
+   so this needs no request — but it does need to be point-in-polygon and not a
+   bounding-box test. North Carolina's counties are nothing like rectangles and
+   their bounding boxes overlap heavily: the first version answered Gaston for a
+   point in Mecklenburg, which would have downloaded the wrong county and opened
+   the wrong bridge. */
+function ringHas(ring,lat,lon){
+  let inside=false;
+  for(let i=0,j=ring.length-1;i<ring.length;j=i++){
+    const xi=ring[i][0], yi=ring[i][1], xj=ring[j][0], yj=ring[j][1];   /* lon,lat */
+    if(((yi>lat)!==(yj>lat)) && lon < (xj-xi)*(lat-yi)/((yj-yi)||1e-12)+xi) inside=!inside;
+  }
+  return inside;
+}
+function geomHas(g,lat,lon){
+  if(!g) return false;
+  const polys = g.type==='Polygon' ? [g.coordinates]
+              : g.type==='MultiPolygon' ? g.coordinates : [];
+  for(const poly of polys){
+    if(!poly.length||!ringHas(poly[0],lat,lon)) continue;
+    let inHole=false;
+    for(let h=1;h<poly.length;h++) if(ringHas(poly[h],lat,lon)) inHole=true;
+    if(!inHole) return true;
+  }
+  return false;
+}
+function countyAt(ll){
+  if(!countyLayer) return null;
+  let hit=null;
+  countyLayer.eachLayer(l=>{
+    if(hit||!l.feature) return;
+    try{
+      if(!l.getBounds().contains(L.latLng(ll))) return;      /* cheap reject first */
+      if(geomHas(l.feature.geometry,ll[0],ll[1])) hit=l.feature.properties.CountyName;
+    }catch(e){}
+  });
+  return hit?String(hit).toUpperCase():null;
+}
+async function openCounty(cty){
+  if($('mode').value!=='county'||!$('arg')||$('arg').value!==cty){
+    $('mode').value='county'; buildArg();
+    if($('arg')) $('arg').value=cty;
+  }
+  if(!ALL.length||ALL[0].COUNTY!==cty){ fbState('Loading '+nice1(cty)+' County…'); await runAll(); }
+}
+
+if(FIELD){
+  $('fb-here').onclick=()=>locateMe(true);
+  $('fb-table').onclick=()=>sheet(!document.body.classList.contains('sheet'));
+  /* Ask once, on open. If they decline, everything still works by search. */
+  setTimeout(()=>locateMe(true),1200);
+}
 window.addEventListener('resize',()=>{ try{ map.invalidateSize(); }catch(e){} });
 $('diag').onclick=diagnostics;
 $('reftog').onclick=()=>{const b2=$('refbody'),on=b2.style.display==='none';

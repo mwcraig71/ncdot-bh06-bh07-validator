@@ -1,0 +1,14 @@
+-- ============================================================================
+-- PROPOSED: what an inspector submits from the field.
+--
+-- Precedence in this schema is the enum's declaration order and nothing else,
+-- so where a new source is declared IS its authority. PROPOSED goes below
+-- PUBLISHED, which is the whole point of it: a value typed on a phone at the
+-- side of a road is recorded, attributed and visible, and it changes no
+-- validation and reaches no export until somebody approves it. Approving
+-- copies it up to REVIEWED, where it starts deciding things.
+--
+-- Declared on its own because a new enum value cannot be used in the same
+-- transaction that adds it.
+-- ============================================================================
+alter type value_source add value if not exists 'PROPOSED' before 'PUBLISHED';
