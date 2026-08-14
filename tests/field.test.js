@@ -33,6 +33,14 @@ const mk=async(b,opts={})=>{
       const off=Number(pp.get('resultOffset')||par.get('resultOffset')||0);
       return J(off>0?{features:[]}:FX.bridges); }
     if(u.includes('RoadCharacteristics')) return J(FX.road['590668']||{features:[]});
+    /* NCDOT's route/milepost tool, which is what the pin actually calls: submit
+       a job, poll it, read the result. Mocked in three parts because the pin
+       flow on a phone is the thing under test and it cannot be faked at the
+       answer. */
+    if(u.includes('submitJob')) return J({jobId:'j1',jobStatus:'esriJobSubmitted'});
+    if(/\/jobs\/j1\?/.test(u)) return J({jobId:'j1',jobStatus:'esriJobSucceeded'});
+    if(u.includes('IdentifyRouteMPResults')) return J({value:{features:[{attributes:
+      {RID:'10000085060', MEAS:2.672, RouteName:'I-85', StreetName:'I-85 N'}}]}});
     return J({features:[]});
   });
   await sbmock(p,{bridges:FX.bridges,snbi:FX.snbi.map(x=>Object.assign({},x))});
@@ -223,6 +231,75 @@ const mk=async(b,opts={})=>{
        return !!(blob&&blob.size);}),true);
   ok('the field tile layer reads the device before the network',
      await p.evaluate(()=>baseLayer instanceof CachedTiles),true);
+
+  console.log('\n11. The dot is a tap target, not a pixel');
+  /* A canvas circleMarker is hit-tested against its own radius. At 6 px that is
+     a 12 px target and a fingertip is about 44, which is the whole of "it works
+     sometimes but it is very sensitive to where you tap". */
+  ok('the canvas widens the hit test on a phone',
+     await p.evaluate(()=>canvas.options.tolerance>=12),true);
+  ok('...to about a fingertip once the dot and its stroke are counted',
+     await p.evaluate(()=>{
+       const m=ptLayer.getLayers()[0];
+       return Math.round((m._radius+m._clickTolerance())*2)>=40;}),true);
+  ok('and a tap lands on a bridge from 12 px off centre',
+     await p.evaluate(()=>{
+       const m=ptLayer.getLayers().find(x=>x._bn==='590819');
+       const pt=map.latLngToLayerPoint(m.getLatLng());
+       return m._containsPoint(L.point(pt.x+12,pt.y+6));}),true);
+  ok('no sticky tooltip to eat the first tap',
+     await p.evaluate(()=>!ptLayer.getLayers()[0].getTooltip()),true);
+
+  console.log('\n12. The pin, end to end, the way it is used at a bridge');
+  await p.evaluate(()=>{ select('590819',true); });
+  await p.waitForTimeout(900);
+  ok('the carried feature offers the pin too, not just an empty roadway below',
+     await p.evaluate(()=>{
+       const f=featuresOf(ALL.find(x=>x.BRDG_NBR==='590819')).find(x=>isRowFeature(x));
+       return !!document.querySelector('a.pinf[data-des="'+f.des+'"]');}),true);
+  /* innerHTML, not innerText: on a phone the label is icon-only by design, so
+     the words are in the document and not in the rendered text. */
+  ok('...and says it is a re-measure where a value is already there',
+     await p.evaluate(()=>/Re-measure this roadway/.test(document.getElementById('dr-body').innerHTML)),true);
+
+  const des=await p.evaluate(()=>{
+    const f=featuresOf(ALL.find(x=>x.BRDG_NBR==='590819')).find(x=>isRowFeature(x));
+    document.querySelector('a.pinf[data-des="'+f.des+'"]').click(); return f.des;});
+  await p.waitForTimeout(400);
+  ok('arming the pin gets the panel out of the way of the map',
+     await p.evaluate(()=>document.getElementById('drawer').classList.contains('open')),false);
+  ok('...and the bridge is still what the pin is armed for',
+     await p.evaluate(()=>PINTARGET&&PINTARGET.bn),'590819');
+
+  /* The exact sequence that lost it: the inspector closes the panel to reach the
+     map. That used to clear SEL, so the measurement arrived with nothing to
+     attach to and no confirmation was ever drawn. */
+  await p.evaluate(()=>{ document.getElementById('dr-x').click(); });
+  await p.waitForTimeout(300);
+  ok('closing the panel does not disarm a pin armed from it',
+     await p.evaluate(()=>!!PINTARGET&&SEL==='590819'),true);
+
+  await p.evaluate(()=>pinAt(ALL.find(x=>x.BRDG_NBR==='590819').LAT_DD,
+                             ALL.find(x=>x.BRDG_NBR==='590819').LONG_DD));
+  await p.waitForFunction(()=>PENDPIN!==null,null,{timeout:20000});
+  await p.waitForTimeout(500);
+  ok('the measurement asks before it is written',
+     await p.evaluate(()=>/is this the road you meant/i.test(document.getElementById('dr-body').innerText)),true);
+  ok('...and the panel is open again so the question can be seen',
+     await p.evaluate(()=>document.getElementById('drawer').classList.contains('open')),true);
+  ok('...showing what it found',
+     await p.evaluate(()=>/10000085060/.test(document.getElementById('dr-body').innerText)),true);
+
+  const nBefore=proposals.length;
+  await p.evaluate(()=>document.querySelector('a.pinyes').click());
+  await p.waitForTimeout(1200);
+  ok('accepting on the carried feature corrects BH06 and BH07 for the bridge',
+     await p.evaluate(()=>{const r=REVIEW.get('590819')||{}; return r.fix06+' @ '+r.fix07;}),
+     '10000085060 @ 2.672');
+  ok('...and is queued for approval rather than applied',
+     proposals.length-nBefore,2);
+  ok('...as a proposal against that feature',
+     proposals.slice(nBefore).every(x=>x.p_structure==='590819'&&x.p_designation===des),true);
 
   console.log('\npage errors: '+JSON.stringify(errs));
   await b.close();

@@ -180,6 +180,10 @@ If that structure is one of a twin pair, the bar names the sister and how far aw
 because 40 to 120 ft is inside a phone's own fix accuracy and the tool will not pretend to
 know which deck you are standing on.
 
+**The dots are thumb-sized targets.** The bridge markers are small on purpose — a map full of
+fat dots is unreadable at county scale — but what you tap is a ~44 px circle around each one,
+not the dot itself, and there is no tooltip to swallow the first tap.
+
 **The panel leads with the answer.** BH06 and BH07 for this bridge, at the top. Then every
 other feature on and under it, each with its own BH06 and BH07. The review paperwork — notes,
 status, corrected values — is demoted to the bottom.
@@ -196,11 +200,20 @@ structure in that county still validates.
 **Add new feature** sits at the end of the feature list. It creates the feature and arms the
 pin at it, so the next thing you do is point at the roadway on the map.
 
-**The pin asks before it writes.** When the pin is aimed at a feature, clicking the map does
-not fill the feature in. It shows you what it found — the route, the milepoint, the road name —
-and asks *is this the road you meant?* Yes writes it; try again re-arms the pin. NCDOT's tool
-returns the *nearest* route, and at an interchange the nearest route is frequently not the one
-you were pointing at, so the confirmation is the point rather than a formality.
+**The pin is offered on every feature, including the one the bridge carries.** Each feature has
+a *Pick this roadway on the map* control — *Re-measure* where a value is already there. On the
+carried feature that is how you correct the bridge's own BH06 and BH07 by pointing at the road,
+and the correction is tested the moment you accept it, exactly as if you had typed it.
+
+**Arming the pin closes the panel**, because on a phone the panel *is* the screen and you have
+to reach the map. Closing it that way does not lose the bridge — the pin stays armed for the
+structure it was armed from, and the panel comes back by itself when the measurement lands.
+
+**The pin asks before it writes.** Clicking the map does not fill the feature in. It shows you
+what it found — the route, the milepoint, the road name — and asks *is this the road you meant?*
+Yes writes it; try again re-arms the pin. NCDOT's tool returns the *nearest* route, and at an
+interchange the nearest route is frequently not the one you were pointing at, so the
+confirmation is the point rather than a formality.
 
 **Removing a feature is a request, not a delete.** If a roadway in the list is not there — the
 derivation invented it, it is a duplicate, it was rebuilt away — you can ask for it to be

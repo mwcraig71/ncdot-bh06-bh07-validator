@@ -110,6 +110,21 @@ submission is queued rather than applied, it survives the page closing because i
 localStorage, and it goes out when the connection returns. The county itself round-trips
 through IndexedDB and every structure validates again with the network switched off.
 
+Its last two sections are the phone as it is actually held. A canvas circleMarker
+is hit-tested against its own radius, so a 6 px dot was a 12 px target against a
+44 px fingertip — "it works sometimes, but it's very sensitive to where you tap"
+was a precise description of the bug. The suite asserts the widened hit test, that
+a tap 12 px off centre still lands on the bridge, and that no sticky tooltip eats
+the first tap. Then the pin, end to end, through NCDOT's route/milepost tool
+mocked in its three parts: the carried feature offers the pin at all, arming it
+closes the panel so the map can be reached, **closing the panel does not disarm
+the pin** — that one line is the whole bug, since the close handler cleared the
+selection and the measurement then arrived with nothing to attach to — the panel
+reopens with the confirmation, and accepting on the carried feature corrects the
+bridge's own BH06 and BH07 and queues **both** for approval. Both, because a
+second submission arriving mid-flush used to be overwritten by the first one's
+save, and accepting a pin drop submits BH06 and BH07 back to back.
+
 `approvals.test.js` is about the other half of field capture, and the question it
 keeps asking is not "does the button work" but "does the screen tell an approver
 enough to be right". Most of it is the verdict: a milepoint past the end of its
@@ -135,8 +150,8 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **87** features, **21** columns, **51** field,
-**49** approvals — 334 in all.
+corrections, **37** auth, **87** features, **21** columns, **66** field,
+**49** approvals — 349 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

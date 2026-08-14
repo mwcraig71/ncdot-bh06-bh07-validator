@@ -1953,7 +1953,14 @@ const ptLayer=L.layerGroup().addTo(map);
 const routeLayer=L.layerGroup().addTo(map);
 const labelLayer=L.layerGroup();
 let countyLayer=null;
-const canvas=L.canvas({padding:0.5});
+/* A canvas circleMarker is hit-tested against its own radius, so a 6 px dot is
+   a 12 px target - and a fingertip is about 44. That is the whole of "it works
+   sometimes, but it is very sensitive to where you tap": the dot was never the
+   target, it was the entire target. `tolerance` widens the hit test without
+   widening the dot, so the map looks the same and the bridge is catchable.
+   6 + 15 + half the stroke is a ~43 px target, which is the number Apple and
+   Google both land on for a thumb. */
+const canvas=L.canvas({padding:0.5, tolerance: FIELD? 15 : 4});
 
 /* Top centre of the map, not a corner. The bridge panel opens over the right of
    the map and the pin was underneath it — unreachable exactly when it is wanted,
@@ -2029,8 +2036,12 @@ function drawPoints(){
       fillColor: fieldPin? '#1A1A1A' : SEVCOL[b._esev||b._sev],
       fillOpacity: fieldPin? .9 : ((b._esev||b._sev)==='ok'?.75:.95)});
     m.on('click',()=>select(b.BRDG_NBR,false));
-    m.bindTooltip(b.BRDG_NBR+' — '+(b._rid||'no route')+' @ '+(b._mp3===null?'—':b._mp3.toFixed(3))+
-      (b._src==='REVIEWED'?'  (reviewed)':''),{sticky:true});
+    /* No hover on a phone, so a sticky tooltip turns the first tap into "show
+       the label" and makes opening a bridge a two-tap operation that looks like
+       a miss. The bar names the structure anyway. */
+    if(!fieldPin)
+      m.bindTooltip(b.BRDG_NBR+' — '+(b._rid||'no route')+' @ '+(b._mp3===null?'—':b._mp3.toFixed(3))+
+        (b._src==='REVIEWED'?'  (reviewed)':''),{sticky:true});
     m._bn=b.BRDG_NBR;
     ptLayer.addLayer(m);
   });
@@ -3992,6 +4003,7 @@ function featurePanel(b){
     const rid=effRidF(b,f), n=mp3(effMpF(b,f)), d=decodeRID(rid);
     const rv=REVIEW.get(fkey(b,f))||{};
     const isPrim=f.primary&&f.loc==='C';
+    const hasRid=/^\d{11}$/.test(rid||'');
     const col=SEVCOL[f.sev||'ok'];
     h+='<div class="find" style="border-left-color:'+col+';background:#FAFAFA">'+
       '<b>'+esc(f.des)+' &middot; '+(f.loc==='C'?'Carried on bridge':'Below bridge')+
@@ -4066,13 +4078,20 @@ function featurePanel(b){
           esc(f.removalAsked)+' — waiting on an approver. The feature is still reported until '+
           'they decide, because an unapproved opinion is not a reason to stop reporting a roadway.</div>'
         : '')+
-      (f.loc==='B'&&(!f.rid||!/^\d{11}$/.test(f.rid))
-        ? '<div style="margin-top:6px"><a href="#" class="pinf pinbtn" data-des="'+esc(f.des)+
-          '" title="Pick this roadway on the map"><span class="pi">&#9678;</span>'+
-          '<span class="pl">Pick this roadway on the map</span></a>'+
-          '<div style="font-size:11.5px;color:#5A5A5A;margin-top:3px">Arms the pin, then tap the road '+
-          (f.name?'(<b>'+esc(f.name)+'</b>) ':'')+'where it passes under the bridge.</div></div>'
-        : '')+
+      /* Offered on EVERY feature, not only on unresolved roadways beneath. The
+         commonest thing an inspector standing at a bridge wants to correct is
+         the bridge's own route and milepoint, and there was no way to point at
+         it: the pin could only be armed from a feature that had nothing in it
+         yet, so the carried feature - the one the panel leads with - had no way
+         in at all. */
+      '<div style="margin-top:6px"><a href="#" class="pinf pinbtn" data-des="'+esc(f.des)+
+        '" title="Pick this roadway on the map"><span class="pi">&#9678;</span><span class="pl">'+
+        (hasRid? 'Re-measure this roadway on the map' : 'Pick this roadway on the map')+'</span></a>'+
+        '<div style="font-size:11.5px;color:#5A5A5A;margin-top:3px">Arms the pin, then tap '+
+        (f.name?'<b>'+esc(f.name)+'</b> ':'the roadway ')+
+        (f.loc==='C'? 'on the deck, where the bridge carries it.'
+                    : 'where it passes under the bridge.')+
+        ' Nothing is written until you confirm what it finds.</div></div>'+
     '</div>';
   });
   /* Everything NCDOT holds, plus everything measured, and then the one thing
@@ -4291,7 +4310,7 @@ function drawDetail(b){
     if(!pinMode) $('pin').click();
     toast('Feature '+f.des+' added. Tap the roadway on the map where it passes under '+bn+
           ' — its route and milepoint are measured from that point, and it goes to an approver.',10000);
-    if(FIELD) sheet(false);
+    if(FIELD){ sheet(false); $('drawer').classList.remove('open'); }
   };
   $('dr-body').querySelectorAll('a.rmf').forEach(a=>a.onclick=e=>{
     e.preventDefault();
@@ -4313,6 +4332,26 @@ function drawDetail(b){
     const bb=ALL.find(x=>x.BRDG_NBR===bn)||b, p=PENDPIN;
     if(!p) return;
     const f=featuresOf(bb).find(x=>x.des===p.des);
+    /* The primary carried feature IS the table row - its values come from the
+       bridge record, so writing them onto the feature object would be erased by
+       the next validation pass. A measurement accepted there is a CORRECTION to
+       BH06/BH07, which is the same thing a reviewer types into the box at the
+       top, and it goes through the same path so it is tested the same way. */
+    if(f&&isRowFeature(f)){
+      const r=rec(bn,true); r.fix06=p.rid; r.fix07=p.mp.toFixed(3); touch(bn);
+      PENDPIN=null;
+      revalidate(); applyFilters(); drawDetail(bb);
+      if(FIELD){
+        submitProposal(bn,f.des,'BH06',p.rid,'measured on the map');
+        submitProposal(bn,f.des,'BH07',p.mp.toFixed(3),'measured on the map');
+        toast('BH06 and BH07 for '+bn+' recorded as '+p.rid+' at '+p.mp.toFixed(3)+
+              ' and queued for approval.',9000);
+      } else {
+        toast('BH06 and BH07 for '+bn+' corrected to '+p.rid+' at '+p.mp.toFixed(3)+
+              '. Every check has re-run against your value.',8000);
+      }
+      return;
+    }
     if(f){
       f.rid=p.rid; f.mp=p.mp; f.resolved=true; f.off=null; f.confidence='medium';
       f.origin='pin drop by '+(reviewerName()||'a reviewer')+' on '+new Date().toLocaleDateString();
@@ -4336,14 +4375,22 @@ function drawDetail(b){
     PENDPIN=null; PINTARGET={bn, des:a.dataset.des};
     if(!pinMode) $('pin').click();
     drawDetail(bb);
+    if(FIELD) $('drawer').classList.remove('open');
     toast('Nothing written. Tap the road again — zoom in first if two roads run close together.',8000);
   });
   $('dr-body').querySelectorAll('a.pinf').forEach(a=>a.onclick=e=>{
     e.preventDefault();
     PINTARGET={bn, des:a.dataset.des};
     if(!pinMode) $('pin').click();
-    toast('Pin armed for feature '+a.dataset.des+'. Click the roadway where it passes under bridge '+bn+
-          '. The route and milepoint at that point become that feature\u2019s values.',9000);
+    /* Get out of the way. On a phone the panel is the whole screen, so leaving
+       it open after arming the pin asks the inspector to work out that they
+       have to dismiss it first - and dismissing it is exactly what used to lose
+       the bridge the pin was armed for. */
+    if(FIELD){ $('drawer').classList.remove('open'); sheet(false); }
+    toast(FIELD
+      ? 'Pin armed for '+a.dataset.des+'. Tap the roadway on the map — pinch in first if two roads run close together.'
+      : 'Pin armed for feature '+a.dataset.des+'. Click the roadway where it passes under bridge '+bn+
+        '. The route and milepoint at that point become that feature\u2019s values.',9000);
   });
   $('dr-body').querySelectorAll('input.fx06,input.fx07').forEach(el=>{
     el.onchange=()=>{
@@ -4423,24 +4470,41 @@ async function pinAt(lat,lon){
        bridge's BH06 and left two different numbers on screen contradicting each
        other. It is a measurement; it now says so, and where the point lands on
        an open structure it says which of that structure's features it matched. */
-    const sel=SEL?ALL.find(x=>x.BRDG_NBR===SEL):null;
+    /* The pin was armed FOR A BRIDGE, and that is what decides where the answer
+       goes - not SEL. On a phone the panel covers the map, so the inspector has
+       to close it before they can tap the road, and closing it used to clear the
+       selection: the measurement then arrived with nothing to attach itself to,
+       the confirmation never appeared, and the pin stayed silently armed. The
+       armed target is the authoritative link. */
+    const tgt=PINTARGET? ALL.find(x=>x.BRDG_NBR===PINTARGET.bn) : null;
+    const sel=tgt||(SEL?ALL.find(x=>x.BRDG_NBR===SEL):null);
 
     /* If the reviewer armed the pin from a feature, this measurement belongs to
        that feature. Written as a DERIVED value with its provenance attached, so
        an export can say where the number came from and who pointed at it. */
-    if(PINTARGET&&sel&&PINTARGET.bn===sel.BRDG_NBR&&at.RID&&at.MEAS!=null){
-      const f=featuresOf(sel).find(x=>x.des===PINTARGET.des);
+    if(tgt&&at.RID&&at.MEAS!=null){
+      const f=featuresOf(tgt).find(x=>x.des===PINTARGET.des);
       /* Never write straight in. The pin returns the NEAREST route to the point
          tapped, and at a grade separation - which is the only place a feature
          beneath a bridge exists - the nearest route is frequently the wrong one
          of two or three stacked within a few feet. So show what it found, in
          words, and make accepting it a decision rather than a side effect of
          tapping. */
-      if(f) PENDPIN={bn:sel.BRDG_NBR, des:f.des, rid:at.RID,
+      if(f) PENDPIN={bn:tgt.BRDG_NBR, des:f.des, rid:at.RID,
                      mp:Math.round(Number(at.MEAS)*1000)/1000,
                      name:at.StreetName||at.RouteName||'', dec:d};
       PINTARGET=null;
-      if(f){ drawDetail(sel); return; }
+      if(f){
+        /* And put the panel back. On the phone it was closed to reach the map,
+           so drawing the card into a hidden panel is the same as not drawing it. */
+        SEL=tgt.BRDG_NBR;
+        drawDetail(tgt); renderTable(); $('drawer').classList.add('open');
+        const card=$('dr-body').querySelector('.pinyes');
+        if(card) try{ card.closest('.find').scrollIntoView({block:'center'}); }catch(e){}
+        toast('Found '+at.RID+' at '+Number(at.MEAS).toFixed(3)+
+              '. Check it against the road you meant, then use it or try again.',9000);
+        return;
+      }
     }
     const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
     L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
@@ -4925,24 +4989,34 @@ function pendLoad(){ try{ return JSON.parse(localStorage.getItem(PENDKEY)||'[]')
 function pendSave(q){ try{ localStorage.setItem(PENDKEY,JSON.stringify(q)); }catch(e){} }
 function pendCount(){ return pendLoad().length; }
 
+/* Every queued item carries an id, because the flush has to be able to say
+   which ones it sent. Without one it could only save "what is left", and two
+   submissions a millisecond apart - which is exactly what accepting a pin drop
+   is, BH06 then BH07 - had the second one overwritten by the first one's save. */
+const pendId=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
 async function submitProposal(bn,des,field,value,note){
-  const item={kind:'value',bn,des,field,value,note:note||'',by:reviewerName()||'',at:Date.now()};
+  const item={id:pendId(),kind:'value',bn,des,field,value,note:note||'',by:reviewerName()||'',at:Date.now()};
   const q=pendLoad(); q.push(item); pendSave(q);
   updatePending();
   flushProposals();
 }
 async function submitRemoval(bn,des,reason){
-  const item={kind:'removal',bn,des,note:reason,by:reviewerName()||'',at:Date.now()};
+  const item={id:pendId(),kind:'removal',bn,des,note:reason,by:reviewerName()||'',at:Date.now()};
   const q=pendLoad(); q.push(item); pendSave(q);
   updatePending();
   flushProposals();
 }
 
-let FLUSHING=false;
+let FLUSHING=false, FLUSHAGAIN=false;
 async function flushProposals(){
-  if(FLUSHING) return;
-  const q=pendLoad();
+  /* A second submission arriving mid-flush used to be dropped: it was appended
+     to the queue, the in-flight flush finished and saved ITS idea of what was
+     left, and the new item went with it. Accepting a pin drop submits BH06 and
+     BH07 back to back, so this lost half of every field correction. */
+  if(FLUSHING){ FLUSHAGAIN=true; return; }
+  const q=pendLoad().map(it=>it.id?it:Object.assign({},it,{id:pendId()}));
   if(!q.length) return;
+  pendSave(q);
   if(!navigator.onLine){ updatePending('offline'); return; }
   if(!signedIn()){ updatePending('sign in to send'); return; }
   FLUSHING=true;
@@ -4956,8 +5030,13 @@ async function flushProposals(){
            p_field:it.field, p_value:String(it.value), p_note:it.note});
     }catch(e){ it.err=String(e.message||e); left.push(it); }
   }
-  pendSave(left);
+  /* Re-read: anything submitted while we were away is in there and has not been
+     sent. Only the ids this pass actually delivered come out. */
+  const failed=new Map(left.map(it=>[it.id,it]));
+  const sent=new Set(q.filter(it=>!failed.has(it.id)).map(it=>it.id));
+  pendSave(pendLoad().filter(it=>!sent.has(it.id)).map(it=>failed.get(it.id)||it));
   FLUSHING=false;
+  if(FLUSHAGAIN){ FLUSHAGAIN=false; setTimeout(flushProposals,0); }
   updatePending();
   if(!left.length&&q.length) toast(q.length.toLocaleString()+' submission'+(q.length===1?'':'s')+
     ' sent for approval. They change nothing until an approver accepts them.',8000);
@@ -5584,7 +5663,14 @@ $('clearf').onclick=()=>{Object.keys(COLF).forEach(k=>delete COLF[k]);
   $('silentbtn').textContent='Show what submits clean but is wrong'; applyFilters();};
 ['f-q','f-mpmin','f-mpmax'].forEach(i=>$(i).oninput=()=>{clearTimeout(window._d);window._d=setTimeout(applyFilters,280);});
 ['f-county','f-div','f-class','f-inv','f-maint','f-stype','f-cond','f-triage'].forEach(i=>$(i).onchange=applyFilters);
-$('dr-x').onclick=()=>{$('drawer').classList.remove('open');SEL=null;routeLayer.clearLayers();renderTable();};
+$('dr-x').onclick=()=>{
+  $('drawer').classList.remove('open');
+  /* Keep the selection while a pin is armed for this bridge. Closing the panel
+     is how you REACH the map on a phone, so treating it as "never mind" threw
+     away the thing the next tap was for. */
+  if(!(PINTARGET&&PINTARGET.bn===SEL)){ SEL=null; routeLayer.clearLayers(); }
+  renderTable();
+};
 $('l-county').onchange=e=>{if(countyLayer) e.target.checked?countyLayer.addTo(map):map.removeLayer(countyLayer);};
 $('l-label').onchange=e=>{e.target.checked?labelLayer.addTo(map):map.removeLayer(labelLayer);};
 $('l-route').onchange=()=>{const b=ALL.find(x=>x.BRDG_NBR===SEL); drawRoute(b?b._rid:null);};
