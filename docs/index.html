@@ -384,6 +384,49 @@ body.field.sheet #fieldbar{background:var(--orange)}
 .pinmode #map{cursor:crosshair}
 .empty{padding:34px;text-align:center;color:var(--gray-3);font-size:13px}
 .empty b{display:block;font-family:var(--font-h);font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--gray-2);margin-bottom:6px}
+
+/* ---- approvals ---------------------------------------------------------
+   A work surface, not an inbox. Each structure is a card, each feature a
+   block inside it, and the verdict sits under the proposal rather than
+   behind a click, because an approver who has to go looking for it stops
+   looking for it. */
+#ascroll{overflow:auto;height:100%;padding:10px 12px 40px;background:#FAFAFA}
+.apprbar{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--gray-2);
+  padding:2px 2px 8px;border-bottom:1px solid var(--line)}
+.apprbar .sp{flex:1}
+.apprnote{margin:8px 2px 12px;max-width:900px}
+.alink{color:var(--blue);text-decoration:none;font-size:12px;font-weight:600;margin-left:12px}
+.alink:hover{text-decoration:underline}
+.apprg{background:#fff;border:1px solid var(--line);border-radius:6px;margin:10px 0;overflow:hidden}
+.apprh{display:flex;align-items:center;gap:8px;padding:9px 12px;background:#F2F4F7;
+  border-bottom:1px solid var(--line);font-size:13px}
+.apprh .sp{flex:1}
+.apprsub{color:var(--gray-2);font-size:12px;font-weight:400}
+.apprf{border-bottom:1px solid var(--line);padding:8px 12px 10px;border-left:4px solid transparent}
+.apprf:last-child{border-bottom:0}
+.apprf.v-no{border-left-color:#CF3910;background:#FFF6F3}
+.apprf.v-ask{border-left-color:#B26B00;background:#FFFBF2}
+.apprf.v-ok{border-left-color:#2E7D32}
+.apprfh{font-size:12.5px;margin-bottom:6px;color:var(--ink)}
+.apprfh .tag{display:inline-block;padding:1px 7px;border-radius:9px;background:#E7EAF0;
+  color:var(--gray-2);font-size:10.5px;letter-spacing:.4px;text-transform:uppercase;margin:0 4px}
+.apprrow{display:flex;align-items:flex-start;gap:12px;padding:5px 0;font-size:12.5px}
+.apprrow.rm .apprwhat b{color:#CF3910}
+.apprrow.gone{opacity:.55}
+.apprwhat{flex:1;min-width:0}
+.apprwhat .was{color:var(--gray-3);text-decoration:line-through}
+.apprwhat .arr{color:var(--gray-3)}
+.apprwhat .now{font-weight:700;font-family:var(--mono,ui-monospace,Menlo,monospace)}
+.apprwhy{color:var(--gray-2);font-size:11.5px;margin-top:2px;white-space:pre-wrap}
+.apprwho{width:130px;color:var(--gray-2);font-size:11px;text-align:right;flex:none}
+.apprdo{display:flex;gap:6px;flex:none}
+.btn.sm{padding:3px 9px;font-size:11.5px}
+.apprv{margin-top:6px;border-top:1px dashed var(--line);padding-top:6px}
+.apprv .vrow{font-size:11.5px;color:var(--gray-1);padding:1px 0;display:flex;gap:7px;align-items:flex-start}
+.apprv .vrow i{font-style:normal;font-weight:700;width:12px;flex:none;text-align:center}
+#apprdot{display:none;margin-left:6px;background:var(--red);color:#fff;border-radius:9px;
+  padding:0 6px;font-size:10.5px;font-weight:700;line-height:16px}
+body.field #apprbtn{display:none}
 </style>
 </head>
 <body>
@@ -418,6 +461,7 @@ body.field.sheet #fieldbar{background:var(--orange)}
   <span class="hdr-sp"></span>
   <span id="hpmsn" class="tb-note"></span>
   <button class="btn ghost" id="csv" disabled>Export CSV</button>
+  <button class="btn ghost" id="apprbtn" title="What has been submitted from the field and is waiting on a decision">Approvals<span id="apprdot"></span></button>
   <button class="btn ghost" id="setbtn" title="Review files, HPMS, tools and network">Settings<span id="revdot"></span></button>
 </div>
 
@@ -550,7 +594,7 @@ body.field.sheet #fieldbar{background:var(--orange)}
     <div class="splitter" id="split"></div>
     <div id="tablewrap">
       <div class="tbar">
-        <span class="ttl">Results</span>
+        <span class="ttl" id="ttl">Results</span>
         <span class="n" id="tcount" style="font-size:11.5px;color:var(--gray-2)"></span>
         <span class="sp"></span>
         <span style="font-size:11px;color:var(--gray-3)">click a row to inspect &middot; click a header to sort &middot;
@@ -559,6 +603,7 @@ body.field.sheet #fieldbar{background:var(--orange)}
       <div class="tscroll" id="tscroll">
         <div class="empty"><b>No data loaded</b>Pick a scope above and press Run.</div>
       </div>
+      <div id="ascroll" style="display:none"></div>
     </div>
   </div>
 </main>
@@ -1418,6 +1463,7 @@ async function runAll(){
 
 async function run(){
   REFRAME=true;                    /* whatever else called us, this is a new scope */
+  if(APPR.open) showApprovals(false);   /* results into a hidden table looks like nothing happened */
   let where;
   try{ where=buildWhere(); }catch(e){ toast(e.message,4200); return; }
   busy(true,'Loading bridges','contacting NCDOT',4);
@@ -3996,6 +4042,9 @@ $('fillnull').onclick=deriveMissing;
 $('ncdotcsv').onclick=exportNCDOT;
 $('csv').onclick=exportCSV;
 $('setbtn').onclick=()=>{ $('settings').classList.add('on'); syncSettings(); renderUnmapped(); };
+/* The approvals view replaces the results table rather than covering the map:
+   the thing an approver most needs beside a proposal is the bridge it is about. */
+$('apprbtn').onclick=()=>showApprovals(!APPR.open);
 $('set-x').onclick=()=>$('settings').classList.remove('on');
 $('settings').onclick=e=>{ if(e.target.id==='settings') $('settings').classList.remove('on'); };
 function syncSettings(){
@@ -4218,15 +4267,10 @@ async function flushProposals(){
   for(const it of q){
     try{
       const rm=it.kind==='removal';
-      const r=await fetch(SB_URL+'/rest/v1/rpc/'+(rm?'propose_feature_removal':'propose_value'),{
-        method:'POST',
-        headers:{apikey:SB_KEY, Authorization:'Bearer '+SESSION.token,
-                 'Content-Type':'application/json'},
-        body:JSON.stringify(rm
-          ? {p_structure:it.bn, p_designation:it.des, p_reason:it.note}
-          : {p_structure:it.bn, p_designation:it.des,
-             p_field:it.field, p_value:String(it.value), p_note:it.note})});
-      if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,120));
+      await sbRpc(rm?'propose_feature_removal':'propose_value', rm
+        ? {p_structure:it.bn, p_designation:it.des, p_reason:it.note}
+        : {p_structure:it.bn, p_designation:it.des,
+           p_field:it.field, p_value:String(it.value), p_note:it.note});
     }catch(e){ it.err=String(e.message||e); left.push(it); }
   }
   pendSave(left);
@@ -4242,6 +4286,434 @@ function updatePending(msg){
   const d=$('penddot'); if(d) d.style.display=n?'inline-block':'none';
 }
 window.addEventListener('online',()=>flushProposals());
+
+/* ==========================================================================
+   APPROVALS
+   The other half of field capture. An inspector submits; nothing moves until
+   somebody decides. This is where deciding happens, and it deliberately looks
+   nothing like an inbox: an approver is not confirming that a message arrived,
+   they are agreeing to tell FHWA a number.
+
+   So the queue does the work first. Every proposal is checked against the same
+   rules the tool applies to NCDOT's own published values — does that route
+   exist, does the milepoint fall inside it, does it put you at the bridge, is
+   BH06 even reportable on that feature — and the verdict sits beside the
+   proposal before anyone clicks anything. An approver who has to open the
+   bridge and re-derive the answer by hand is an approver who will eventually
+   stop reading.
+
+   It lives in this file rather than in an admin application because the thing
+   an approver most needs is the bridge itself: the map is right there, and
+   accepting a value takes you to the structure it belongs to.
+   ========================================================================== */
+const APPR={items:[], dir:[], me:false, loaded:false, busy:false, err:null,
+            verdicts:new Map(), coords:new Map(), open:false};
+let APPRGEO=new Map();            /* RouteID -> paths, for measuring one proposal */
+
+async function sbRpc(fn,body){
+  const r=await fetch(SB_URL+'/rest/v1/rpc/'+fn,{method:'POST',
+    headers:{apikey:SB_KEY, Authorization:'Bearer '+(SESSION.token||SB_KEY),
+             'Content-Type':'application/json'},
+    body:JSON.stringify(body||{})});
+  const t=await r.text();
+  let j=null; try{ j=t?JSON.parse(t):null; }catch(e){}
+  if(!r.ok) throw new Error((j&&(j.message||j.hint))||('HTTP '+r.status+' '+String(t).slice(0,140)));
+  return j;
+}
+
+/* ---- reading the queue ---------------------------------------------------
+   Three reads, and all three are public. The provenance of a public submittal
+   is public: anyone can see what was proposed, by whom, and who decided it.
+   Only the deciding is restricted. */
+async function loadQueue(){
+  if(APPR.busy) return;
+  APPR.busy=true; APPR.err=null; renderApprovals();
+  try{
+    const [q,dir]=await Promise.all([
+      sbAll('proposal_queue?select=*'),
+      sbAll('approver_directory?select=*')]);
+    APPR.items=q; APPR.dir=dir; APPR.loaded=true;
+    APPR.me=false;
+    if(signedIn()){ try{ APPR.me=!!(await sbRpc('is_approver')); }catch(e){} }
+    renderApprovals();
+    await verifyQueue();
+  }catch(e){ APPR.err=String(e.message||e); }
+  APPR.busy=false; renderApprovals(); updateApprDot();
+}
+
+/* One structure, its features, and every open item on each. A field visit
+   produces several proposals at one bridge and they are one decision in
+   practice, so they are one card here. */
+function apprGroups(){
+  const byS=new Map();
+  APPR.items.forEach(it=>{
+    const bn=it.structure_number;
+    if(!byS.has(bn)) byS.set(bn,{bn, county:it.county_name, div:it.division, feats:new Map()});
+    const g=byS.get(bn);
+    if(!g.feats.has(it.feature_id))
+      g.feats.set(it.feature_id,{fid:it.feature_id, des:it.designation, loc:it.location_type,
+                                 name:it.feature_name, rows:[]});
+    g.feats.get(it.feature_id).rows.push(it);
+  });
+  return [...byS.values()].map(g=>({bn:g.bn, county:g.county, div:g.div,
+      feats:[...g.feats.values()].sort((a,b)=>String(a.des||'').localeCompare(String(b.des||'')))}))
+    .sort((a,b)=>String(a.bn).localeCompare(String(b.bn)));
+}
+
+/* The pair a verdict is about. A BH07 proposal is meaningless without the route
+   it is measured on, so an unchanged published BH06 is part of what gets
+   tested — which is the point: accepting a milepoint accepts the pair. */
+function apprPair(f){
+  const v=fld=>f.rows.find(r=>r.kind==='value'&&r.field===fld);
+  const p06=v('BH06'), p07=v('BH07');
+  /* current_bh06 / current_bh07 are the feature's standing pair, which the
+     queue carries precisely so that a BH07 submitted on its own can still be
+     tested: an inspector correcting only the milepoint does not resubmit the
+     route, and a milepoint with no route is not a thing that can be judged. */
+  const cur=f.rows.find(r=>r.current_bh06!=null||r.current_bh07!=null)||{};
+  const pub=fld=>{const r=f.rows.find(x=>x.field===fld); return r?r.published_value:null;};
+  return {rid:(p06?p06.proposed_value:null)||pub('BH06')||cur.current_bh06||null,
+          mp:mp3(p07?p07.proposed_value:(pub('BH07')!=null?pub('BH07'):cur.current_bh07)),
+          new06:!!p06, new07:!!p07, p06, p07};
+}
+
+/* ---- the verdict ---------------------------------------------------------
+   Same rules, same thresholds, same wording as the checks that run against
+   NCDOT's published values. A proposal is not a different kind of number. */
+async function verifyQueue(){
+  const gs=apprGroups();
+  if(!gs.length) return;
+
+  /* Coordinates, so the offset can be measured for structures outside whatever
+     scope happens to be loaded. One query for the whole queue. */
+  const need=gs.map(g=>g.bn).filter(bn=>!APPR.coords.has(bn));
+  need.forEach(bn=>{ const b=ALL.find(x=>x.BRDG_NBR===bn);
+    if(b&&b.LAT_DD) APPR.coords.set(bn,{lat:b.LAT_DD,lon:b.LONG_DD,county:b.COUNTY,rid:b._rid,mp:b._mp3}); });
+  const still=gs.map(g=>g.bn).filter(bn=>!APPR.coords.has(bn));
+  if(still.length){
+    try{
+      const j=await esriQuery(BRIDGES,{where:"BRDG_NBR IN ("+still.map(x=>"'"+String(x).replace(/'/g,"")+"'").join(',')+")",
+        outFields:BFIELDS, returnGeometry:'false'},true);
+      (j.features||[]).forEach(f=>{const a=f.attributes;
+        APPR.coords.set(String(a.BRDG_NBR).trim(),{lat:a.LAT_DD,lon:a.LONG_DD,county:a.COUNTY,rid:a.RTE_ID,mp:mp3(a.MP)});});
+    }catch(e){}
+  }
+
+  /* Extents for every route the queue mentions, including the published ones. */
+  const rids=[...new Set(gs.flatMap(g=>g.feats.map(f=>apprPair(f).rid))
+                          .filter(r=>/^\d{11}$/.test(r||'')&&!ROUTELEN[r]))];
+  for(let i=0;i<rids.length;i+=200){
+    const chunk=rids.slice(i,i+200);
+    try{
+      const rows=await sbAll('route_extents?select=route_id,min_mp,max_mp&route_id=in.'+sbIn(chunk));
+      rows.forEach(r=>{ ROUTELEN[r.route_id]={min:Number(r.min_mp),max:Number(r.max_mp)}; });
+      chunk.forEach(id=>ROUTEASKED.add(id));
+    }catch(e){}
+  }
+
+  for(const g of gs) for(const f of g.feats){
+    APPR.verdicts.set(f.fid, await verifyFeature(g,f));
+    renderApprovals();
+  }
+}
+
+/* Where the milepoint actually lands. Measured, not asserted — the same walk
+   along the route's own geometry that Locate check does, for one value. */
+async function measureOffset(rid,mp,lat,lon){
+  if(!/^\d{11}$/.test(rid||'')||mp==null||!lat) return null;
+  if(!APPRGEO.has(rid)){
+    try{
+      const j=await esriQuery(ROADCHAR,{where:"RouteID='"+rid+"'", outFields:'RouteID',
+        returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:2000},true);
+      const paths=[];
+      (j.features||[]).forEach(f=>(f.geometry&&f.geometry.paths||[]).forEach(p=>paths.push(p)));
+      APPRGEO.set(rid,paths);
+    }catch(e){ APPRGEO.set(rid,null); }
+  }
+  const paths=APPRGEO.get(rid);
+  if(!paths||!paths.length) return null;
+  const pt=pointAtM(paths,mp); if(!pt) return null;
+  const sp=toStatePlane(lat,lon);
+  return Math.hypot(pt[0]-sp.x, pt[1]-sp.y);
+}
+
+async function verifyFeature(g,f){
+  const out=[], pr=apprPair(f), rid=pr.rid, mp=pr.mp;
+  const co=APPR.coords.get(g.bn)||{};
+  const removal=f.rows.some(r=>r.kind==='removal');
+  const add=(s,t)=>out.push({s,t});          /* s: ok | no | ask | note */
+
+  if(removal){
+    add('ask','A removal cannot be checked against the LRS — nothing measures the absence of a road. '+
+              'Open the bridge and look at what else is reported beneath it.');
+  }
+
+  /* B.F.02 before anything numeric. A BH06 on a roadway beneath is not a wrong
+     value, it is a value that should not be reported at all. */
+  if(pr.new06&&f.loc&&String(f.loc).toUpperCase().startsWith('B'))
+    add('no','BH06-4 — this feature is a roadway BENEATH the structure. A road passing under does '+
+             'not get a BH06 at all; the route ID belongs to whichever structure carries it.');
+
+  if(rid&&/^\d{11}$/.test(rid)){
+    const d=decodeRID(rid);
+    add('note','Route '+rid+(d&&d.label?' — '+d.label:'')+(d&&d.county?', '+d.county+' County':''));
+    const code=COUNTIES[co.county||g.county];
+    if(code&&rid.slice(8)!==code)
+      add('no','The county in the route ID is '+(d&&d.county?d.county:rid.slice(8))+
+               ', but the structure is in '+(co.county||g.county)+'. A milepoint measured on '+
+               'another county’s route means nothing here.');
+    else if(code) add('ok','County code agrees with the structure’s county.');
+    if(d&&['4','6','9'].includes(rid[2]))
+      add('ask','Inventory direction '+rid[2]+' — not a primary inventory route. Legitimate on a '+
+                'divided facility; worth a look if the bridge is undivided.');
+    if(HPMS.size) add(HPMS.has(rid)?'ok':'no',
+      HPMS.has(rid)? 'Present in the HPMS submittal (BH06-3).'
+                   : 'BH06-3 — not present in the state’s HPMS submittal.');
+  }else if(rid){
+    add('no','BH06 is not an 11-digit LRS Route ID. NCDOT’s format is class, qualifier, '+
+             'inventory direction, five-digit number, three-digit county code.');
+  }else if(pr.new07){
+    add('ask','No BH06 on this feature, so the milepoint cannot be tested against a route.');
+  }
+
+  if(mp!=null){
+    const rl=ROUTELEN[rid];
+    if(rl){
+      if(mp>rl.max+0.01)      add('no','Beyond the route. '+rid+' runs '+rl.min.toFixed(3)+' to '+
+                                       rl.max.toFixed(3)+' in this county; '+mp.toFixed(3)+' is off the end of it.');
+      else if(mp<rl.min-0.01) add('no','Before the route starts. '+rid+' begins at '+rl.min.toFixed(3)+'.');
+      else                    add('ok','Inside the route’s extent ('+rl.min.toFixed(3)+' to '+rl.max.toFixed(3)+').');
+    }else if(/^\d{11}$/.test(rid||'')) add('ask','That route is not in the published extents, so the milepoint cannot be bounded.');
+    const s=String(pr.new07?(pr.p07?pr.p07.proposed_value:''):mp);
+    const dec=s.includes('.')?s.split('.')[1].length:0;
+    if(pr.new07&&dec<3) add('ask','Recorded to '+dec+' decimal'+(dec===1?'':'s')+'. BH07 is reported to three.');
+    if(mp===0) add('ask','A milepoint of exactly 0.000 is the county line. Occasionally right, usually a placeholder.');
+    const off=await measureOffset(rid,mp,co.lat,co.lon);
+    if(off==null) add('ask','Could not measure where this milepoint lands — the route geometry does not cover it.');
+    else if(off<=TOLFT) add('ok','Lands '+Math.round(off)+' ft from the structure, inside the '+TOLFT+' ft tolerance.');
+    else add('no','Lands '+Math.round(off).toLocaleString()+' ft from the structure — '+
+                  (off/5280).toFixed(2)+' miles away. This is the check FHWA does not run.');
+  }else if(pr.new06&&!String(f.loc||'').toUpperCase().startsWith('B')){
+    add('ask','No BH07 on this feature, so there is nothing to place on the route.');
+  }
+
+  const worst=out.some(x=>x.s==='no')?'no':out.some(x=>x.s==='ask')?'ask':out.some(x=>x.s==='ok')?'ok':'note';
+  return {rows:out, worst};
+}
+
+/* ---- deciding ------------------------------------------------------------ */
+async function decideValue(fid,field,accept,reason){
+  if(!accept&&!String(reason||'').trim()){
+    toast('A rejection needs a reason. The inspector who submitted it has to be able to read why.',6000); return false; }
+  try{
+    await sbRpc(accept?'approve_proposal':'reject_proposal',
+      {p_feature:fid, p_field:field, p_reason:reason||null});
+    return true;
+  }catch(e){ toast(String(e.message||e),9000); return false; }
+}
+async function decideRemoval(fid,accept,reason){
+  if(!accept&&!String(reason||'').trim()){
+    toast('Keeping a feature over an inspector’s objection needs a reason.',6000); return false; }
+  try{ await sbRpc('decide_feature_removal',{p_feature:fid, p_accept:!!accept, p_reason:reason||null});
+       return true;
+  }catch(e){ toast(String(e.message||e),9000); return false; }
+}
+
+/* Accept every VALUE proposal on one structure. Removals are excluded on
+   purpose: a value can be corrected again tomorrow, a withdrawn feature takes
+   its clearances and its traffic with it, and that is not a decision to make
+   in a batch. */
+async function acceptStructure(bn){
+  const g=apprGroups().find(x=>x.bn===bn); if(!g) return;
+  const rows=g.feats.flatMap(f=>f.rows).filter(r=>r.kind==='value');
+  if(!rows.length){ toast('Nothing on '+bn+' but removal requests, and those are decided one at a time.',6000); return; }
+  const bad=g.feats.filter(f=>(APPR.verdicts.get(f.fid)||{}).worst==='no').length;
+  if(bad&&!confirm(bad+' of these did not pass the checks. Accept all '+rows.length+' anyway?')) return;
+  let ok=0;
+  for(const r of rows){ if(await decideValue(r.feature_id,r.field,true,null)) ok++; }
+  toast(ok+' of '+rows.length+' accepted on '+bn+'.',5000);
+  await loadQueue();
+}
+
+/* ---- who may decide ------------------------------------------------------ */
+async function grantApprover(email,name){
+  try{ const r=await sbRpc('grant_approver',{p_email:email,p_display_name:name||null});
+       toast((r&&r.display_name?r.display_name:email)+' can now approve submissions.',6000);
+       await loadQueue(); return true;
+  }catch(e){ toast(String(e.message||e),10000); return false; }
+}
+async function revokeApprover(actor,reason){
+  try{ await sbRpc('revoke_approver',{p_actor:actor,p_reason:reason||null});
+       toast('Approver removed. The record of what they decided stays.',6000);
+       await loadQueue(); return true;
+  }catch(e){ toast(String(e.message||e),10000); return false; }
+}
+
+/* ---- drawing ------------------------------------------------------------- */
+const VSYM={ok:'&#10003;', no:'&#10007;', ask:'?', note:'&middot;'};
+const VCLR={ok:'#2E7D32', no:'#CF3910', ask:'#B26B00', note:'#5A5A5A'};
+
+function apprCount(){ return APPR.items.length; }
+function updateApprDot(){
+  const d=$('apprdot'); if(!d) return;
+  const n=apprCount();
+  d.textContent=n?String(n):''; d.style.display=n?'inline-block':'none';
+}
+
+function showApprovals(on){
+  APPR.open=!!on;
+  const t=$('tscroll'), a=$('ascroll'), ttl=$('ttl'), cnt=$('tcount');
+  if(!a) return;
+  if(t) t.style.display=APPR.open?'none':'';
+  a.style.display=APPR.open?'':'none';
+  if(ttl) ttl.textContent=APPR.open?'Approvals':'Results';
+  if(cnt&&APPR.open) cnt.textContent='';
+  const b=$('apprbtn'); if(b) b.classList.toggle('primary',APPR.open);
+  if(APPR.open&&!APPR.loaded) loadQueue(); else renderApprovals();
+}
+
+function renderApprovals(){
+  const el=$('ascroll'); if(!el||!APPR.open) return;
+  if(APPR.err){ el.innerHTML='<div class="empty"><b>The queue could not be read</b>'+esc(APPR.err)+'</div>'; return; }
+  if(!APPR.loaded&&APPR.busy){ el.innerHTML='<div class="empty"><b>Reading the queue&hellip;</b></div>'; return; }
+
+  const gs=apprGroups();
+  let h='<div class="apprbar">'+
+    '<b>'+apprCount().toLocaleString()+'</b> waiting on a decision'+
+    (gs.length?' across '+gs.length.toLocaleString()+' structure'+(gs.length===1?'':'s'):'')+
+    '<span class="sp"></span>'+
+    '<a href="#" class="alink" id="a-refresh">refresh</a></div>';
+
+  h+= APPR.me
+    ? '<p class="hint apprnote">You are a designated approver. Accepting writes a REVIEWED value, which is '+
+      'what every check and every export then reads. NCDOT’s published value is never overwritten — it stays '+
+      'underneath, and withdrawing your decision restores it.</p>'
+    : (signedIn()
+       ? '<p class="hint apprnote">You are signed in but not a designated approver, so this is read-only. '+
+         'Anyone can see what was submitted and what was decided; only an approver can decide it.</p>'
+       : '<p class="hint apprnote">Not signed in. The queue is public — the provenance of a submittal is public — '+
+         'but deciding needs an approver account.</p>');
+
+  if(!gs.length){
+    h+='<div class="empty"><b>Nothing waiting</b>Values and removals submitted from the field arrive here. '+
+       'They change nothing until somebody accepts them.</div>';
+  }
+
+  gs.forEach(g=>{
+    const worst=g.feats.map(f=>(APPR.verdicts.get(f.fid)||{}).worst)
+                       .reduce((a,b)=>a==='no'||b==='no'?'no':a==='ask'||b==='ask'?'ask':a||b,'ok');
+    h+='<div class="apprg" data-bn="'+esc(g.bn)+'">'+
+      '<div class="apprh"><b>'+esc(g.bn)+'</b> '+
+      '<span class="apprsub">'+esc(g.county||'')+(g.div?' &middot; Division '+esc(g.div):'')+' &middot; '+
+      g.feats.length+' feature'+(g.feats.length===1?'':'s')+'</span>'+
+      '<span class="sp"></span>'+
+      '<a href="#" class="alink aopen" data-bn="'+esc(g.bn)+'">open the bridge</a>'+
+      (APPR.me? ' <a href="#" class="alink aall" data-bn="'+esc(g.bn)+'">accept all values here</a>':'')+
+      '</div>';
+
+    g.feats.forEach(f=>{
+      const v=APPR.verdicts.get(f.fid), pr=apprPair(f);
+      h+='<div class="apprf'+(v?' v-'+v.worst:'')+'">'+
+        '<div class="apprfh"><b>'+esc(f.des||'')+'</b> '+
+        (String(f.loc||'').toUpperCase().startsWith('C')?'<span class="tag">carried</span>':'<span class="tag">below</span>')+
+        ' '+esc(f.name||'')+'</div>';
+
+      f.rows.forEach(r=>{
+        if(r.kind==='removal'){
+          h+='<div class="apprrow rm"><div class="apprwhat"><b>Remove this feature</b>'+
+            '<div class="apprwhy">'+esc(r.note||'no reason given')+'</div></div>'+
+            '<div class="apprwho">'+esc(r.proposed_by||'unknown')+
+            (r.proposed_at?'<br>'+new Date(r.proposed_at).toLocaleDateString():'')+'</div>'+
+            (APPR.me?'<div class="apprdo">'+
+              '<button class="btn ghost sm ayes" data-fid="'+r.feature_id+'" data-kind="removal">Remove it</button>'+
+              '<button class="btn ghost sm ano" data-fid="'+r.feature_id+'" data-kind="removal">Keep it</button>'+
+              '</div>':'')+'</div>';
+        }else{
+          h+='<div class="apprrow"><div class="apprwhat"><b>'+esc(r.field)+'</b> '+
+            '<span class="was">'+esc(r.published_value==null?'nothing recorded':r.published_value)+'</span>'+
+            ' <span class="arr">&rarr;</span> <span class="now">'+esc(r.proposed_value)+'</span>'+
+            (r.note?'<div class="apprwhy">'+esc(r.note)+'</div>':'')+'</div>'+
+            '<div class="apprwho">'+esc(r.proposed_by||'unknown')+
+            (r.proposed_at?'<br>'+new Date(r.proposed_at).toLocaleDateString():'')+'</div>'+
+            (APPR.me?'<div class="apprdo">'+
+              '<button class="btn ghost sm ayes" data-fid="'+r.feature_id+'" data-field="'+esc(r.field)+'">Accept</button>'+
+              '<button class="btn ghost sm ano" data-fid="'+r.feature_id+'" data-field="'+esc(r.field)+'">Reject</button>'+
+              '</div>':'')+'</div>';
+        }
+      });
+
+      h+='<div class="apprv">';
+      if(!v) h+='<span class="hint">checking&hellip;</span>';
+      else v.rows.forEach(x=>{ h+='<div class="vrow"><i style="color:'+VCLR[x.s]+'">'+VSYM[x.s]+'</i>'+esc(x.t)+'</div>'; });
+      h+='</div></div>';
+    });
+    h+='</div>';
+  });
+
+  /* Who may decide. Drawn for everyone — knowing who can change the submittal
+     is not privileged information — and actionable only for an approver. */
+  const live=APPR.dir.filter(d=>!d.revoked_at), gone=APPR.dir.filter(d=>d.revoked_at);
+  h+='<div class="apprg"><div class="apprh"><b>Approvers</b><span class="apprsub">'+
+     live.length+' can decide'+(gone.length?' &middot; '+gone.length+' revoked':'')+'</span></div>';
+  if(!live.length) h+='<p class="hint apprnote">Nobody holds the role yet. The first approver is granted from the '+
+     'Supabase dashboard with the service key — somebody has to be trusted first, and it should not be whoever signs in first.</p>';
+  live.forEach(d=>{
+    h+='<div class="apprrow"><div class="apprwhat"><b>'+esc(d.display_name||'unnamed')+'</b>'+
+      '<div class="apprwhy">appointed '+(d.granted_at?new Date(d.granted_at).toLocaleDateString():'')+
+      (d.granted_by_name?' by '+esc(d.granted_by_name):' with the service key')+
+      ' &middot; '+(d.decisions||0)+' decision'+(Number(d.decisions)===1?'':'s')+'</div></div>'+
+      (APPR.me?'<div class="apprdo"><button class="btn ghost sm arev" data-actor="'+esc(d.actor)+'">Revoke</button></div>':'')+
+      '</div>';
+  });
+  gone.forEach(d=>{
+    h+='<div class="apprrow gone"><div class="apprwhat">'+esc(d.display_name||'unnamed')+
+      '<div class="apprwhy">revoked '+(d.revoked_at?new Date(d.revoked_at).toLocaleDateString():'')+
+      (d.revoked_by_name?' by '+esc(d.revoked_by_name):'')+
+      (d.revoke_reason?' — '+esc(d.revoke_reason):'')+'</div></div></div>';
+  });
+  if(APPR.me){
+    h+='<div class="apprrow"><div class="apprwhat">'+
+      '<input id="a-email" type="email" placeholder="work email of an account that has signed in" style="width:320px">'+
+      '</div><div class="apprdo"><button class="btn ghost sm" id="a-grant">Appoint</button></div></div>'+
+      '<p class="hint apprnote">Appointing works on an account that already exists, which is why it takes an '+
+      'email address rather than a name: signing in once is what creates the account, and an appointment '+
+      'should not be able to invent a person. The last approver cannot be revoked.</p>';
+  }
+  h+='</div>';
+
+  el.innerHTML=h;
+
+  /* bindings */
+  const on=(sel,fn)=>el.querySelectorAll(sel).forEach(n=>n.addEventListener('click',e=>{e.preventDefault();fn(n,e);}));
+  on('#a-refresh',()=>{ APPR.verdicts.clear(); loadQueue(); });
+  on('.aopen',n=>{ const bn=n.dataset.bn;
+    const b=ALL.find(x=>x.BRDG_NBR===bn);
+    if(b){ showApprovals(false); select(bn,true); }
+    else { $('mode').value='bridge'; buildArg(); const a=$('arg'); if(a) a.value=bn;
+           showApprovals(false); run(); } });
+  on('.aall',n=>acceptStructure(n.dataset.bn));
+  on('.ayes',async n=>{
+    const fid=n.dataset.fid;
+    const okd=n.dataset.kind==='removal' ? await decideRemoval(fid,true,null)
+                                         : await decideValue(fid,n.dataset.field,true,null);
+    if(okd){ toast(n.dataset.kind==='removal'?'Feature withdrawn. It stays in the record with your name on it.'
+                                             :'Accepted. That is now the value every check reads.',6000);
+             APPR.verdicts.delete(fid); await loadQueue(); } });
+  on('.ano',async n=>{
+    const fid=n.dataset.fid, rm=n.dataset.kind==='removal';
+    const why=prompt(rm? 'Why is this feature being kept? The inspector who asked has to be able to read it.'
+                       : 'Why is this proposal rejected? The inspector who submitted it has to be able to read it.');
+    if(why===null) return;
+    const okd=rm? await decideRemoval(fid,false,why) : await decideValue(fid,n.dataset.field,false,why);
+    if(okd){ toast(rm?'Kept, with your reason on the record.':'Rejected, with your reason on the record.',6000);
+             APPR.verdicts.delete(fid); await loadQueue(); } });
+  on('#a-grant',()=>{ const em=($('a-email')&&$('a-email').value||'').trim();
+    if(!em){ toast('Give the work email address of the account to appoint.',5000); return; }
+    grantApprover(em,null); });
+  on('.arev',n=>{ const why=prompt('Why is this approver being removed? Optional, and it stays on the record.');
+    if(why===null) return; revokeApprover(n.dataset.actor,why); });
+}
+
 
 /* ==========================================================================
    FIELD MODE
@@ -4524,6 +4996,10 @@ function applySession(){
   if(out) out.style.display = signedIn()?'':'none';
   /* Show/hide only. The database refuses these regardless of what is drawn. */
   document.body.classList.toggle('signed-in', signedIn());
+  /* An approver should not have to click to find out there is work waiting. One
+     read, on sign-in only: an anonymous visitor still asks the server for
+     nothing it did not need. */
+  if(signedIn()&&!APPR.loaded&&!APPR.busy&&SB_URL&&SB_URL.indexOf('__')!==0) loadQueue();
   if(SEL){ const b=ALL.find(x=>x.BRDG_NBR===SEL); if(b) drawDetail(b); }
 }
 

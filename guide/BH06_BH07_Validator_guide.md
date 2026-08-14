@@ -601,6 +601,77 @@ it. Confirm those before they go anywhere.
 
 ---
 
+## Approvals — deciding what the field submitted
+
+Everything an inspector submits from a phone is a **proposal**. It changes nothing until
+somebody accepts it. **Approvals**, next to Settings in the toolbar, is where that happens: it
+replaces the results table and leaves the map where it is, because the thing you most want
+beside a proposal is the bridge it is about.
+
+**The queue is public. Deciding is not.** Anyone can open it and see what was submitted, by
+whom, and what was decided — the provenance of a public submittal is public. Accepting and
+rejecting need a designated approver account.
+
+### The screen checks the proposal before you do
+
+Each feature's proposals are shown together, with the verdict underneath. Every proposal is run
+through the same rules the tool applies to NCDOT's own published values:
+
+- **Is BH06 even reportable here?** A BH06 proposed on a roadway that runs *beneath* the
+  structure fails BH06-4 outright — a road passing under does not get a route ID at all.
+- **Is the route the right shape, in the right county?** Eleven digits, and the county code in
+  the ID has to match the county the structure is in.
+- **Is it in the HPMS submittal?** BH06-3, where HPMS is loaded.
+- **Does the milepoint fall inside the route?** Measured against the route's published extent,
+  so `30.100` on a route that runs 0.000 to 21.155 is called out as being off the end of it.
+- **Does it put you at the bridge?** The tool walks the route's own geometry to the proposed
+  milepoint and reports the distance from the structure in feet. This is the check FHWA does
+  not run.
+
+A green tick, an amber question mark and a red cross carry the same meaning they do everywhere
+else in the tool, and the whole card takes the colour of the worst thing on it. A proposal that
+corrects only BH07 is still tested, on the route the feature already has.
+
+A **removal request** is the exception: nothing measures the absence of a road, so the screen
+says so and points you at the bridge.
+
+### Deciding
+
+**Accept** writes a REVIEWED value, which is what every check and every export then reads.
+NCDOT's published value is never overwritten — it stays underneath, and withdrawing the
+decision restores it exactly.
+
+**Reject** needs a reason, always. The inspector who submitted it has to be able to read why,
+and the reason is kept with the decision.
+
+**Accept all values here** takes every value proposal on one structure at once, since a single
+field visit usually produces several. If any of them failed the checks it says so and asks
+again. Removal requests are deliberately excluded: a value can be corrected again tomorrow, but
+a withdrawn feature takes its clearances and its traffic with it.
+
+A removal is accepted or refused on its own. Accepting **withdraws** the feature rather than
+deleting it, so the record of what was reported and who removed it survives.
+
+### Approvers
+
+The bottom of the screen lists who currently holds the role, when it was granted and by whom,
+and how many decisions they have made — plus anyone whose role was revoked, with the reason.
+Revoked, never deleted: "who could approve what, when" has an answer for any date in the past.
+
+An approver can **appoint** another one by work email. It has to be an email rather than a name
+because the account has to already exist — signing in once is what creates it, and an
+appointment should not be able to invent a person. **The last approver cannot be revoked**, by
+anyone including the service key, because a queue nobody can decide is worse than an approver
+nobody wanted.
+
+The *first* approver is granted from the Supabase dashboard with the service key. Somebody has
+to be trusted first, and it should not be whoever signs in first.
+
+**Field mode has no Approvals button.** An inspector submits and somebody else decides; putting
+both halves in one pair of hands on one phone would defeat the point of having a queue.
+
+---
+
 ## Review — notes, status and clearing findings
 
 Every check the tool raises is a *suggestion*. Some will be wrong, some will be things you've

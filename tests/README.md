@@ -1,6 +1,6 @@
 # Tests
 
-Seven Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
+Eight Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
 service and all six tile hosts — so none of them needs network access, and none of
 them can pass because a live service happened to answer.
 
@@ -13,6 +13,7 @@ node tests/auth.test.js        dist/NCDOT_BH06_BH07_Validator.html
 node tests/features.test.js    dist/NCDOT_BH06_BH07_Validator.html
 node tests/columns.test.js     dist/NCDOT_BH06_BH07_Validator.html
 node tests/field.test.js       dist/NCDOT_BH06_BH07_Validator.html
+node tests/approvals.test.js   dist/NCDOT_BH06_BH07_Validator.html
 ```
 
 Each takes a build as its argument and should pass on all three: `dist/`, the
@@ -109,13 +110,33 @@ submission is queued rather than applied, it survives the page closing because i
 localStorage, and it goes out when the connection returns. The county itself round-trips
 through IndexedDB and every structure validates again with the network switched off.
 
-`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all seven. It
+`approvals.test.js` is about the other half of field capture, and the question it
+keeps asking is not "does the button work" but "does the screen tell an approver
+enough to be right". Most of it is the verdict: a milepoint past the end of its
+route, a BH06 proposed on a roadway that runs *beneath* the bridge, a route ID
+carrying the wrong county — all things that pass every FHWA submittal check and
+are still wrong, put in front of the person about to accept them. It asserts that
+a proposal correcting only BH07 is still tested, on the route the feature already
+has, which is what migration 0032 put in the queue.
+
+The rest is refusals. An anonymous visitor can read the queue and gets no
+buttons; a signed-in non-approver gets none either, and is told why; a rejection
+with no reason never reaches the database; accept-all takes the value proposals
+on one structure and leaves the removal request alone. It covers appointing an
+approver by email, the refusal when that account has never signed in, and the
+refusal to revoke the last one — each arriving as the database's own sentence
+rather than an HTTP code. It also pins the thing that made the view feel broken:
+running a scope while the queue is open now leaves it, instead of filling a table
+nobody can see.
+
+`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all eight. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **87** features, **21** columns, **50** field — 284 in all.
+corrections, **37** auth, **87** features, **21** columns, **51** field,
+**49** approvals — 334 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

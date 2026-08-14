@@ -65,6 +65,10 @@ const mk=async(b,opts={})=>{
   console.log('\n2. No verdict to read off the map');
   ok('the severity legend is not added',
      await p.evaluate(()=>!document.querySelector('.legend')),true);
+  /* An inspector submits; somebody else decides. Putting the queue on the phone
+     would put the two halves of that in one pair of hands. */
+  ok('and no approvals queue on the phone either',
+     await p.evaluate(()=>getComputedStyle(document.getElementById('apprbtn')).display),'none');
 
   console.log('\n3. The table starts hidden, on a tab you pull up');
   ok('closed on open',await p.evaluate(()=>document.body.classList.contains('sheet')),false);

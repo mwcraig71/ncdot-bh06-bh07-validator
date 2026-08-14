@@ -114,8 +114,16 @@ module.exports = function sbmock(page, opts = {}) {
       published_at: '2026-06-28T15:11:00Z', completed_at: '2026-08-13T18:40:00Z', row_count: 315494 },
   ];
 
+  /* The approvals queue and the approver directory. Both are ordinary reads —
+     the queue is public because the provenance of a public submittal is public
+     — so they are ordinary fixtures. A suite that wants the decisions to have
+     an effect passes `rpc`, below, and mutates these arrays itself. */
+  const proposal_queue = opts.queue || [];
+  const approver_directory = opts.directory || [];
+
   const TABLES = { county_geojson, structure_snbi: snbi, route_extents: extents,
-                   hpms_routes: hpms, data_vintage: vintage };
+                   hpms_routes: hpms, data_vintage: vintage,
+                   proposal_queue, approver_directory };
 
   return page.route(SB + '/rest/v1/**', async route => {
     const req = route.request();
@@ -125,8 +133,18 @@ module.exports = function sbmock(page, opts = {}) {
                                                    body: JSON.stringify(o) });
 
     if (table.startsWith('rpc/')) {
-      log.push({ table, rpc: table.slice(4), body: req.postData(), method: req.method() });
+      const name = table.slice(4);
+      log.push({ table, rpc: name, body: req.postData(), method: req.method() });
       if (opts.rpcFails) return J({ message: opts.rpcFails }, 400);
+      /* A suite can hand a real implementation per function. Returning
+         {status, body} lets it assert the refusal paths, which is where the
+         interesting behaviour is: the database is the thing saying no. */
+      if (opts.rpc && opts.rpc[name]) {
+        let arg = {}; try { arg = JSON.parse(req.postData() || '{}'); } catch (e) {}
+        const out = opts.rpc[name](arg);
+        if (out && typeof out === 'object' && 'status' in out) return J(out.body, out.status);
+        return J(out === undefined ? null : out);
+      }
       return J(null);
     }
 
@@ -153,6 +171,7 @@ module.exports = function sbmock(page, opts = {}) {
     if (opts.fail && opts.fail === table) return J({ message: 'boom' }, 500);
     return J(rows.slice(offset, offset + limit));
   }).then(() => ({ log, SB, county_geojson, snbi, extents, hpms, vintage,
+                   proposal_queue, approver_directory,
                    /* helpers the suites read */
                    reads: t => log.filter(x => x.table === t),
                    rpcs: () => log.filter(x => x.rpc),
