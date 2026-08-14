@@ -1490,6 +1490,7 @@ const SEVNAME={e:'Error',w:'Warning',i:'Note',ok:'Clean'};
 let ALL=[], VIEW=[], SEL=null, COUNTIES={}, CODE2CNTY={}, SAP2FIPS={}, ROUTELEN={}, DEEP=false;
 let LASTIMPORT={unmapped:[],at:0};   /* what the last review-file import could not place */
 let PINTARGET=null;                  /* {bn,des} — the feature a pin drop should fill */
+let PENDPIN=null;                    /* what a pin drop found, awaiting a yes or no */
 let REVIEW=new Map(), REVDIRTY=false;
 let HPMS=new Map(), DUPES=new Set(), ROUTEASKED=new Set(), LOCATED=false, TOLFT=100;
 let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silentOnly=false;
@@ -1497,6 +1498,9 @@ let activeChecks=new Set(), sortKey='BRDG_NBR', sortDir=1, pinMode=false, silent
    before that, and a const in its temporal dead zone throws on typeof rather
    than reporting undefined. */
 const FIELD=window.matchMedia('(max-width:860px)').matches;
+/* Set when a new scope is loaded, cleared once the map has framed it. Without
+   it every redraw re-frames, and the reviewer loses their place. */
+let REFRAME=true;
 
 /* ---------- reference data ---------------------------------------------------
    Counties, the SNBI inventory, HPMS and route extents are no longer pulled
@@ -1985,9 +1989,18 @@ function drawPoints(){
     m._bn=b.BRDG_NBR;
     ptLayer.addLayer(m);
   });
-  if(pts.length){
+  /* Only frame the scope when the scope has actually changed. drawPoints runs on
+     every reflow — a correction, a filter, a pin drop landing on a feature — and
+     re-fitting the bounds each time threw away whatever the reviewer had zoomed
+     to. Dropping a pin on a road and being returned to the whole county is the
+     case that made this obvious, and it is worst in the field, where zooming in
+     is the whole interaction. */
+  if(pts.length&&REFRAME){
+    REFRAME=false;
     try{ map.invalidateSize({animate:false});
          map.fitBounds(L.latLngBounds(pts.map(b=>[b.LAT_DD,b.LONG_DD])),{padding:[26,26],maxZoom:15}); }catch(e){}
+  } else if(pts.length){
+    try{ map.invalidateSize({animate:false}); }catch(e){}
   }
 }
 
@@ -2058,6 +2071,7 @@ function buildWhere(){
    RUN ALL CHECKS — one button, one pipeline
    ========================================================================== */
 async function runAll(){
+  REFRAME=true;                    /* a new scope: frame it once */
   await run();
   if(!ALL.length) return;
   const n=ALL.length;
@@ -2086,6 +2100,7 @@ async function runAll(){
 }
 
 async function run(){
+  REFRAME=true;                    /* whatever else called us, this is a new scope */
   let where;
   try{ where=buildWhere(); }catch(e){ toast(e.message,4200); return; }
   busy(true,'Loading bridges','contacting NCDOT',4);
@@ -3967,6 +3982,13 @@ function featurePanel(b){
             'background:'+SEVCOL[RULEMAP[x].sev]+'22;color:'+SEVCOL[RULEMAP[x].sev]+'">'+
             esc(RULEMAP[x].t)+'</span>').join('')+'</div>'
         : '<div style="font-size:11.5px;color:#2E7D32">No findings on this feature.</div>')+
+      /* Removing a roadway is a bigger claim than correcting a number, so it is
+         a request rather than an action, and it lives with the review controls
+         rather than beside the values. */
+      (!isPrim&&!f.removalAsked
+        ? '<div style="font-size:11.5px;margin-top:6px"><a href="#" class="rmf" data-des="'+esc(f.des)+
+          '" style="color:#CF3910">This roadway is not here &mdash; ask for it to be removed</a></div>'
+        : '')+
       (isPrim
         ? '<div style="font-size:11.5px;color:#9A9A9A;margin-top:5px">Corrections for this feature go in the box at the top of the panel.</div>'
         : '<div class="revrow" style="margin-top:6px">'+
@@ -3976,6 +3998,28 @@ function featurePanel(b){
               esc(rv.fix07||'')+'" style="flex:1"></div>')+
       /* The manual way in, for the ones nothing automatic can settle: point at
          the road on the map and let NCDOT's own tool answer. */
+      (PENDPIN&&PENDPIN.bn===b.BRDG_NBR&&PENDPIN.des===f.des
+        ? '<div class="find" style="border-left-color:#1E56B3;background:#EAF0FA;margin-top:7px">'+
+          '<b>Is this the road you meant?</b>'+
+          '<div class="mono" style="font-size:14px;color:#1A1A1A">'+esc(PENDPIN.rid)+
+          ' &middot; '+esc(PENDPIN.mp.toFixed(3))+'</div>'+
+          (PENDPIN.dec?'<div style="font-size:11.5px">'+esc(PENDPIN.dec.prefix+'-'+PENDPIN.dec.num+
+            ' · '+PENDPIN.dec.invName+' · '+PENDPIN.dec.cntyName+' County')+'</div>':'')+
+          (PENDPIN.name?'<div style="font-size:11.5px">'+esc(PENDPIN.name)+'</div>':'')+
+          '<div style="font-size:11.5px;color:#5A5A5A;margin:5px 0 7px">This is the route '+
+          '<b>nearest</b> the point you tapped, measured on NCDOT\u2019s LRS. Where roads stack at an '+
+          'interchange the nearest one is often not the one you meant, so nothing is written until '+
+          'you say so.</div>'+
+          '<a href="#" class="pinbtn pinyes" data-des="'+esc(f.des)+'"><span class="pi">&#10003;</span>'+
+          '<span class="pl">Use this</span></a> '+
+          '<a href="#" class="pinbtn pinno" data-des="'+esc(f.des)+'"><span class="pi">&#10005;</span>'+
+          '<span class="pl">Try again</span></a></div>'
+        : '')+
+      (f.removalAsked
+        ? '<div class="find w" style="margin-top:7px"><b>Removal requested</b>'+
+          esc(f.removalAsked)+' — waiting on an approver. The feature is still reported until '+
+          'they decide, because an unapproved opinion is not a reason to stop reporting a roadway.</div>'
+        : '')+
       (f.loc==='B'&&(!f.rid||!/^\d{11}$/.test(f.rid))
         ? '<div style="margin-top:6px"><a href="#" class="pinf pinbtn" data-des="'+esc(f.des)+
           '" title="Pick this roadway on the map"><span class="pi">&#9678;</span>'+
@@ -4203,6 +4247,51 @@ function drawDetail(b){
           ' — its route and milepoint are measured from that point, and it goes to an approver.',10000);
     if(FIELD) sheet(false);
   };
+  $('dr-body').querySelectorAll('a.rmf').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    const bb=ALL.find(x=>x.BRDG_NBR===bn)||b;
+    const f=featuresOf(bb).find(x=>x.des===a.dataset.des);
+    if(!f) return;
+    const why=prompt('Ask for feature '+f.des+' ('+(f.name||'unnamed')+') to be removed from bridge '+
+      bn+'.\n\nWhy is this roadway not there? An approver decides, and your reason is what they read.','');
+    if(why===null) return;
+    if(!why.trim()){ toast('A removal needs a reason — nothing was sent.',6000); return; }
+    f.removalAsked=why.trim();
+    submitRemoval(bn,f.des,why.trim());
+    rollUpFeatures(bb); drawDetail(bb);
+    toast('Removal requested for '+f.des+'. It stays in the data, and in your export, until an '+
+          'approver decides.',9000);
+  });
+  $('dr-body').querySelectorAll('a.pinyes').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    const bb=ALL.find(x=>x.BRDG_NBR===bn)||b, p=PENDPIN;
+    if(!p) return;
+    const f=featuresOf(bb).find(x=>x.des===p.des);
+    if(f){
+      f.rid=p.rid; f.mp=p.mp; f.resolved=true; f.off=null; f.confidence='medium';
+      f.origin='pin drop by '+(reviewerName()||'a reviewer')+' on '+new Date().toLocaleDateString();
+      f.why='Measured by NCDOT\u2019s own route/milepost tool at a point a reviewer chose on the map, and accepted.';
+      f.routes=routesFor(f.name||p.name||'',p.rid);
+      PENDPIN=null;
+      rollUpFeatures(bb); revalidate(); applyFilters(); drawDetail(bb);
+      if(FIELD){
+        submitProposal(bb.BRDG_NBR,f.des,'BH06',p.rid,f.name||p.name||'');
+        submitProposal(bb.BRDG_NBR,f.des,'BH07',p.mp.toFixed(3),f.name||'');
+        toast('Feature '+f.des+' recorded as '+p.rid+' at '+p.mp.toFixed(3)+
+              ' and queued for approval.',9000);
+      } else {
+        toast('Feature '+f.des+' set to '+p.rid+' at '+p.mp.toFixed(3)+'.',7000);
+      }
+    }
+  });
+  $('dr-body').querySelectorAll('a.pinno').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    const bb=ALL.find(x=>x.BRDG_NBR===bn)||b;
+    PENDPIN=null; PINTARGET={bn, des:a.dataset.des};
+    if(!pinMode) $('pin').click();
+    drawDetail(bb);
+    toast('Nothing written. Tap the road again — zoom in first if two roads run close together.',8000);
+  });
   $('dr-body').querySelectorAll('a.pinf').forEach(a=>a.onclick=e=>{
     e.preventDefault();
     PINTARGET={bn, des:a.dataset.des};
@@ -4295,26 +4384,17 @@ async function pinAt(lat,lon){
        an export can say where the number came from and who pointed at it. */
     if(PINTARGET&&sel&&PINTARGET.bn===sel.BRDG_NBR&&at.RID&&at.MEAS!=null){
       const f=featuresOf(sel).find(x=>x.des===PINTARGET.des);
-      if(f){
-        f.rid=at.RID; f.mp=Math.round(Number(at.MEAS)*1000)/1000; f.resolved=true;
-        f.off=null; f.confidence='medium';
-        f.origin='pin drop by '+(reviewerName()||'a reviewer')+' on '+new Date().toLocaleDateString();
-        f.why='Measured by NCDOT\u2019s own route/milepost tool at a point a reviewer chose on the map.';
-        f.routes=routesFor(f.name||at.RouteName||'',at.RID);
-        rollUpFeatures(sel); revalidate(); applyFilters(); drawDetail(sel);
-        /* In the field this is a submission, not an edit: it goes to the queue
-           and decides nothing until somebody with the authority accepts it. */
-        if(FIELD){
-          submitProposal(sel.BRDG_NBR,f.des,'BH06',at.RID,f.name||at.RouteName||'');
-          submitProposal(sel.BRDG_NBR,f.des,'BH07',Number(at.MEAS).toFixed(3),f.name||'');
-          toast('Feature '+f.des+' recorded as '+at.RID+' at '+Number(at.MEAS).toFixed(3)+
-                ' and queued for approval. Check it against the road you meant.',10000);
-        } else {
-          toast('Feature '+f.des+' on bridge '+sel.BRDG_NBR+' set to '+at.RID+' at '+
-                Number(at.MEAS).toFixed(3)+'. Check it against the road you meant before exporting.',10000);
-        }
-      }
+      /* Never write straight in. The pin returns the NEAREST route to the point
+         tapped, and at a grade separation - which is the only place a feature
+         beneath a bridge exists - the nearest route is frequently the wrong one
+         of two or three stacked within a few feet. So show what it found, in
+         words, and make accepting it a decision rather than a side effect of
+         tapping. */
+      if(f) PENDPIN={bn:sel.BRDG_NBR, des:f.des, rid:at.RID,
+                     mp:Math.round(Number(at.MEAS)*1000)/1000,
+                     name:at.StreetName||at.RouteName||'', dec:d};
       PINTARGET=null;
+      if(f){ drawDetail(sel); return; }
     }
     const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
     L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
@@ -4797,7 +4877,13 @@ function pendSave(q){ try{ localStorage.setItem(PENDKEY,JSON.stringify(q)); }cat
 function pendCount(){ return pendLoad().length; }
 
 async function submitProposal(bn,des,field,value,note){
-  const item={bn,des,field,value,note:note||'',by:reviewerName()||'',at:Date.now()};
+  const item={kind:'value',bn,des,field,value,note:note||'',by:reviewerName()||'',at:Date.now()};
+  const q=pendLoad(); q.push(item); pendSave(q);
+  updatePending();
+  flushProposals();
+}
+async function submitRemoval(bn,des,reason){
+  const item={kind:'removal',bn,des,note:reason,by:reviewerName()||'',at:Date.now()};
   const q=pendLoad(); q.push(item); pendSave(q);
   updatePending();
   flushProposals();
@@ -4814,12 +4900,15 @@ async function flushProposals(){
   const left=[];
   for(const it of q){
     try{
-      const r=await fetch(SB_URL+'/rest/v1/rpc/propose_value',{
+      const rm=it.kind==='removal';
+      const r=await fetch(SB_URL+'/rest/v1/rpc/'+(rm?'propose_feature_removal':'propose_value'),{
         method:'POST',
         headers:{apikey:SB_KEY, Authorization:'Bearer '+SESSION.token,
                  'Content-Type':'application/json'},
-        body:JSON.stringify({p_structure:it.bn, p_designation:it.des,
-                             p_field:it.field, p_value:String(it.value), p_note:it.note})});
+        body:JSON.stringify(rm
+          ? {p_structure:it.bn, p_designation:it.des, p_reason:it.note}
+          : {p_structure:it.bn, p_designation:it.des,
+             p_field:it.field, p_value:String(it.value), p_note:it.note})});
       if(!r.ok) throw new Error('HTTP '+r.status+' '+(await r.text()).slice(0,120));
     }catch(e){ it.err=String(e.message||e); left.push(it); }
   }

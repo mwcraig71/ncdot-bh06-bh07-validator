@@ -119,7 +119,7 @@ data, fetch NC's HPMS submittal from FHWA, then Deep check, Locate check, Resolv
 Fill missing. A county takes about ten seconds. When it finishes you get one summary line and a
 fully populated table.
 
-**Pin drop** lives on the map, top right — arm it and click anywhere to read the route and
+**Pin drop** lives on the map, top centre — arm it and click anywhere to read the route and
 milepoint at that spot. Read the label carefully: it reports **the road at the point you
 clicked**, which at a grade separation is usually the road *underneath*, not the road the bridge
 carries. If a bridge is open, the popup says which of that bridge's features the road you clicked
@@ -164,12 +164,55 @@ Filters combine across columns, and the row count above the table tells you how 
 getting 1,282 in the file would be a trap. Clicking a heading still sorts; the boxes do not
 interfere. **Clear filters** in the left panel clears these too.
 
-## On a phone
+## On a phone — field mode
 
-The layout adapts below 860px. Three tabs — **Filters**, **Map**, **Results** — replace the
-side-by-side layout, tapping a row opens the bridge panel full screen, and every control is
-sized for a thumb. The whole workflow works on a phone in the field: run a county, filter to
-errors, tap a structure, read the findings, leave a note.
+Below 860px the tool becomes a different application, because somebody standing under a bridge
+is not doing the same job as somebody working a county list at a desk.
+
+**What is gone.** The filter panel, the tab strip and the severity legend. An inspector at a
+structure does not need a survey of everything wrong in the county; they need this bridge. The
+map fills the screen and the markers no longer carry BH06/BH07 status colours.
+
+**Where it starts.** It asks the phone where you are, centres there, works out which county you
+are standing in — a proper point-in-polygon test, not a bounding box, which is what used to
+answer *Gaston* for a point in Mecklenburg — loads that county, and opens the nearest structure.
+If that structure is one of a twin pair, the bar names the sister and how far away it is,
+because 40 to 120 ft is inside a phone's own fix accuracy and the tool will not pretend to
+know which deck you are standing on.
+
+**The panel leads with the answer.** BH06 and BH07 for this bridge, at the top. Then every
+other feature on and under it, each with its own BH06 and BH07. The review paperwork — notes,
+status, corrected values — is demoted to the bottom.
+
+**The table is still there**, off the bottom of the screen. Pull the tab up to see it.
+
+**Offline.** Opening a bridge caches the whole county — structures, features, routes and the
+county outline — into the phone's own storage, plus map imagery for the area around you. Roughly
+4 MB of data and about 92 image tiles per bridge from cold. Switch the connection off and every
+structure in that county still validates.
+
+### Adding, correcting and removing, in the field
+
+**Add new feature** sits at the end of the feature list. It creates the feature and arms the
+pin at it, so the next thing you do is point at the roadway on the map.
+
+**The pin asks before it writes.** When the pin is aimed at a feature, clicking the map does
+not fill the feature in. It shows you what it found — the route, the milepoint, the road name —
+and asks *is this the road you meant?* Yes writes it; try again re-arms the pin. NCDOT's tool
+returns the *nearest* route, and at an interchange the nearest route is frequently not the one
+you were pointing at, so the confirmation is the point rather than a formality.
+
+**Removing a feature is a request, not a delete.** If a roadway in the list is not there — the
+derivation invented it, it is a duplicate, it was rebuilt away — you can ask for it to be
+removed and say why. The feature **stays in every list and every export**, marked *removal
+requested*, until an approver decides. Being wrong about a value costs one number; being wrong
+about whether a roadway exists costs its whole highway record — the clearances, the traffic,
+everything reported beneath the bridge.
+
+**Everything you submit is queued.** New values and removal requests go into a queue for
+approval rather than straight into the published data. They are held on the phone, so they
+survive closing the browser or losing signal, and go out when the connection returns. Only
+designated approvers can accept them.
 
 ## The four scopes
 
@@ -223,7 +266,7 @@ thousand routes and will ask you to confirm first.
 
 ### Pin drop
 
-**Pin drop** sits on the map itself, top right. Arm it and click anywhere. This calls NCDOT's own
+**Pin drop** sits on the map itself, top centre — above the map rather than in a corner, because the bridge panel opens over the right-hand side and used to cover it. Arm it and click anywhere. This calls NCDOT's own
 `IdentifyRouteMilepostUsingPointTool` — the same drop-a-pin capability TxDOT's map has, which
 NCDOT already publishes but does not surface in its viewer. You get the route ID, the
 milepoint to three decimals, and any concurrent routes at that point.

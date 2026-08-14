@@ -76,9 +76,20 @@ at the clicked point, which at a grade separation is usually not the road the br
 it says which of the open bridge's features that road is.
 
 It covers the triage states, the RD_ANGLE orientation, and the pin drop being
-aimed at a named feature. Its last section feeds the tool the 24 September 2025 inspection report's own numbering — H05
+aimed at a named feature. It feeds the tool the 24 September 2025 inspection report's own numbering — H05
 carried after three below features, R01 through R05 running straight across — and asserts that
 the tool flags the pattern instead of reproducing it.
+
+Its last two sections are what the field asked for. A pin drop **asks before it
+writes**: the answer is held, the panel shows the route and the milepoint it
+found and offers a yes and a try-again, and nothing reaches the feature until the
+yes. A reflow while a bridge is open no longer throws away the zoom — the map
+frames itself once per scope, not once per redraw, which is what sent an
+inspector standing under a bridge back to a county view every time the table
+refilled. And removing a feature is a **request**: the feature stays in the list
+and in the export, the panel says a removal was requested and that it is still
+reported until somebody decides, and the request joins the value proposals in one
+queue.
 
 `columns.test.js` covers filtering on the table itself — a box under every column
 heading, matching against the text in the cell rather than against a field, which is
@@ -104,7 +115,7 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **74** features, **21** columns, **50** field — 271 in all.
+corrections, **37** auth, **87** features, **21** columns, **50** field — 284 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

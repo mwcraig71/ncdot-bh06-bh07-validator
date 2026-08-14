@@ -416,6 +416,61 @@ const patchMock=()=>{
   ok('...and names the feature when the road is one of the open bridge\'s',
      /this road is feature/i.test(src2),true);
 
+  console.log('\n15. A pin drop asks before it writes, and the map stays where it was');
+  await p2.evaluate(()=>select('590819',true));
+  await p2.waitForTimeout(600);
+  await p2.evaluate(()=>{ map.setZoom(17,{animate:false}); });   /* braces: setZoom returns the map, which does not serialise */
+  await p2.waitForTimeout(400);
+  const z0=await p2.evaluate(()=>map.getZoom());          /* let the zoom settle first */
+  await p2.evaluate(()=>{ applyFilters(); });
+  await p2.waitForTimeout(500);
+  ok('a reflow no longer throws away the zoom',await p2.evaluate(()=>map.getZoom()),z0);
+  ok('a new scope still frames itself',await p2.evaluate(()=>{REFRAME=true;return REFRAME;}),true);
+
+  const pend=await p2.evaluate(()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    const f=featuresOf(b).find(x=>x.loc==='B');
+    PENDPIN={bn:'590819',des:f.des,rid:'10800485060',mp:46.958,name:'W I-485 Inner Hy',dec:decodeRID('10800485060')};
+    drawDetail(b);
+    const t=document.getElementById('dr-body').innerText;
+    return {asks:/is this the road you meant/i.test(t),
+            shows:/10800485060/.test(t)&&/46\.958/.test(t),
+            yes:!!document.querySelector('a.pinyes'), no:!!document.querySelector('a.pinno'),
+            written:(featuresOf(b).find(x=>x.des===f.des)||{}).rid};});
+  ok('it asks rather than writing',pend.asks,true);
+  ok('...showing the route and the milepoint it found',pend.shows,true);
+  ok('...with a yes and a try-again',pend.yes&&pend.no,true);
+  ok('and nothing is written until then',pend.written!=='10800485060',true);
+  const took=await p2.evaluate(()=>{
+    document.querySelector('a.pinyes').click();
+    const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    const f=featuresOf(b).find(x=>x.rid==='10800485060');
+    return {rid:f?f.rid:null, pend:PENDPIN};});
+  ok('accepting writes it',took.rid,'10800485060');
+  ok('...and clears the pending answer',took.pend,null);
+
+  console.log('\n16. Removing a feature is a request, not a delete');
+  const rm=await p2.evaluate(()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    const before=featuresOf(b).length;
+    const f=featuresOf(b).filter(x=>x.loc==='B')[0];
+    f.removalAsked='rebuilt in 2019, the road is gone';
+    submitRemoval('590819',f.des,f.removalAsked);
+    rollUpFeatures(b); drawDetail(b);
+    return {before, after:featuresOf(b).length,
+            txt:document.getElementById('dr-body').innerText,
+            queued:pendLoad().filter(x=>x.kind==='removal').length};});
+  ok('the feature is still there',rm.after,rm.before);
+  ok('...and says a removal was requested',/removal requested/i.test(rm.txt),true);
+  ok('...and that it is still reported until somebody decides',
+     /still reported|waiting on an approver/i.test(rm.txt),true);
+  ok('the request is queued for approval',rm.queued,1);
+  ok('the offer to ask is on every feature but the row itself',
+     await p2.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590819');
+       drawDetail(b);
+       const n=document.querySelectorAll('a.rmf').length;
+       return n>0&&n<featuresOf(b).length;}),true);
+
   console.log('\npage errors: '+JSON.stringify(errs.concat(e2)));
   await b.close();
 })();
