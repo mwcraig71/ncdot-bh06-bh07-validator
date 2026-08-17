@@ -661,6 +661,7 @@ body.field #apprbtn{display:none}
       <div class="setsec"><h4>Checks</h4>
         <div class="revrow"><label>Tolerance</label><input type="text" id="tol" value="100" style="width:70px;text-align:right"><span class="tb-lab">ft &mdash; Locate check</span></div>
         <div class="chk"><input type="checkbox" id="autoheavy" checked><span class="lb">Run the per-structure passes<em>Locate, Resolve carried and Fill missing. Asks first on very large scopes.</em></span></div>
+        <div class="chk"><input type="checkbox" id="autotraffic" checked><span class="lb">Derive the traffic items<em>B.H.09, B.H.10 and B.H.11 per feature, from NCDOT&rsquo;s count stations rather than from the bridge record. One read per scope.</em></span></div>
         <p class="hint">Run all checks does everything. These re-run one pass on its own:</p>
         <div class="setbtns">
           <button class="btn ghost" id="deep" disabled>Deep check</button>
@@ -670,6 +671,7 @@ body.field #apprbtn{display:none}
           <button class="btn ghost" id="resolvenamed" disabled title="Pulls only the routes NCDOT names beneath these bridges, and resolves them all in one pass">Resolve named features</button>
           <button class="btn ghost" id="expandfeat" disabled title="The full sweep: also finds roadways NCDOT does not name. One query per structure.">Expand features</button>
           <button class="btn ghost" id="snbibtn" disabled>SNBI data</button>
+          <button class="btn ghost" id="traffic" disabled title="B.H.09, B.H.10 and B.H.11 for every feature, from the count stations">Traffic</button>
         </div>
       </div>
 
@@ -842,7 +844,24 @@ const RULES=[
  {id:'FEATURE_NOT_NAMED', grp:'qc', sev:'w', t:'Roadway found beneath, not named in Feature Crossed',
   d:'A road passes under this deck at the angle the recorded skew predicts, and NCDOT\u2019s Feature Crossed text does not mention it — so the features list is short by one. 590819 is the plain case: the text says only "I485" while two carriageways and two ramps run beneath. Confirm before adding it. If the route decodes as class 5 (municipal or private), it may have been left out on purpose, because a private road is not a state-system feature.'},
  {id:'FEATURE_LOW_CONF', grp:'note', sev:'i', t:'Feature found without deck dimensions',
-  d:'The structure records no length, deck width or skew, so this feature was admitted on a plain radius rather than on the deck footprint and the crossing angle. That is the test that cannot separate a road beneath from a road alongside. Confirm it before submitting.'}
+  d:'The structure records no length, deck width or skew, so this feature was admitted on a plain radius rather than on the deck footprint and the crossing angle. That is the test that cannot separate a road beneath from a road alongside. Confirm it before submitting.'},
+ /* ---------------- traffic: B.H.09, B.H.10, B.H.11 ---------------- */
+ {id:'AADT_NONE', grp:'qc', sev:'w', t:'No AADT for this carried roadway',
+  d:'B.H.09 has to be reported for a highway feature, and nothing in NCDOT\u2019s traffic data covers this route at this milepoint \u2014 no count station governs it and no probe estimate covers it either. Check the route and milepoint first: an AADT that cannot be found is often a BH06 or BH07 that is wrong, because the lookup uses the same route and measure the rest of the tool validates.'},
+ {id:'AADT_NONE_BELOW', grp:'qc', sev:'w', t:'No AADT for the roadway beneath',
+  d:'A road passing under the bridge gets its own highway record \u2014 its own B.H.09, B.H.10 and B.H.11, describing the traffic BELOW rather than the traffic on top. Nothing in the traffic data covers this one, so the feature would be submitted with the traffic items empty.'},
+ {id:'AADT_PROBE', grp:'note', sev:'i', t:'AADT is a probe estimate, not a count',
+  d:'No count station governs this stretch, so the figure comes from NCDOT\u2019s probe-derived layer and is a MODEL with a 95% confidence interval, shown beside it. Two thirds of Mecklenburg\u2019s structures are in this position, so a blank would be the commoner answer than a counted one \u2014 but the estimate is reported as an estimate, and the interval is what makes that honest.'},
+ {id:'AADT_STALE', grp:'qc', sev:'w', t:'The most recent count is old',
+  d:'The governing station has no count within the last six years, which is NCDOT\u2019s own longest collection cycle \u2014 so this is not simply an off-year in an even/odd rota. B.H.11 will carry the old year, which is correct and is the point: the year is reported so that the age of the number is visible rather than implied.'},
+ {id:'AADT_UNDATED', grp:'qc', sev:'w', t:'AADT with no year',
+  d:'A traffic figure was found but nothing dates it \u2014 the segmentation holds a value and it matches no year of its station\u2019s series. B.H.11 cannot be reported from it. An undated volume is the exact failure this whole group exists to correct: it is what NCDOT\u2019s bridge record already carries.'},
+ {id:'AADTT_OVER', grp:'qc', sev:'e', t:'Truck AADT exceeds total AADT',
+  d:'B.H.10 cannot be larger than B.H.09 \u2014 the trucks are a subset of the traffic. This is arithmetic, not judgement, and it almost always means the two came from different stretches of road or different years.'},
+ {id:'AADTT_SHARE', grp:'qc', sev:'w', t:'Implausible truck share',
+  d:'The truck share here is above 45%. Measured across all 12,673 NCDOT segments that carry both a truck count and a share, the mean is 7.2% and the highest anywhere in the state is 43.9% \u2014 so this is outside the observed range and worth confirming before it is submitted.'},
+ {id:'AADT_PUBLISHED_ODD', grp:'qc', sev:'w', t:'NCDOT\u2019s published AADT matches no count here',
+  d:'The AADT on the bridge record is normally a copy of the governing station\u2019s value \u2014 in Mecklenburg 83% of them match exactly. This one matches neither the current count nor the older figure the segmentation holds, so it came from somewhere unaccounted for. It carries no year, so there is no way to tell which year it was meant to be.'}
 ];
 const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
 const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
@@ -1452,6 +1471,7 @@ async function runAll(){
     await loadSNBI();
     if($('autohpms').checked) await fetchHPMS($('mode').value==='all' ? null : neededFips());
     await deepCheck();
+    if($('autotraffic')&&$('autotraffic').checked) await trafficCheck();
     if($('autoheavy').checked){
       const heavy = n>2500
         ? confirm(n.toLocaleString()+' structures. The per-structure passes (Locate, Resolve carried, '+
@@ -1496,6 +1516,7 @@ async function run(){
     $('snbibtn').classList.toggle('on',ALL.some(b=>b._snbi));
     $('fillnull').disabled=ALL.length===0;
     $('expandfeat').disabled=ALL.length===0;
+    $('traffic').disabled=ALL.length===0;
     $('resolvenamed').disabled=ALL.length===0;
     $('csv').disabled=ALL.length===0;
     if(!ALL.length) toast('Nothing matched that query.',4000);
@@ -2413,6 +2434,239 @@ function featuresOf(b){ if(!b._feat) b._feat=baseFeatures(b); return b._feat; }
    was, so the table row and every existing check are untouched. This runs the
    same rules over the other features, plus the two that only exist once
    features do. */
+/* ==========================================================================
+   TRAFFIC — B.H.09, B.H.10 and B.H.11, per feature
+   --------------------------------------------------------------------------
+   The AADT on NCDOT's bridge record is not a measurement. Measured in
+   Mecklenburg: of 355 structures carrying an AADT with a count station on the
+   same route within half a mile, 295 — 83% — equal the station's value
+   exactly, median difference 0.0%. It is a copy. What it does not carry is the
+   YEAR it was copied, which is the entirety of B.H.11, and 11,016 of 23,022
+   structures carry no AADT at all.
+
+   So the three items are derived here, from the traffic data itself, per
+   feature — because that is what they are. A road passing beneath a bridge has
+   its own traffic, its own trucks and its own count year, and a bridge row with
+   one AADT field cannot hold them.
+
+   THE TOTAL comes from the count station, which is dated: a value per year from
+   2002 to 2024, and the 2024 release is what NCDOT submitted to FHWA.
+
+   THE TRUCKS are the awkward part. There is no dated truck series anywhere —
+   trucks exist only on the segmentation, at a vintage that varies segment by
+   segment (measured statewide: 38.9% of segments are 2022, 17.2% 2024, 18.7%
+   match no year at all). So the truck COUNT is not carried forward. The truck
+   SHARE is, applied to the current total, and every derived value records the
+   year its share came from. Share moves far more slowly than volume.
+
+   WHERE NO STATION GOVERNS — two thirds of Mecklenburg's structures — the probe
+   estimate stands in, and it is never reported without its 95% interval.
+   ========================================================================== */
+const TRAFFIC=new Map();          /* route id -> segments, each with its station's current value */
+const PROBE=new Map();            /* route id -> probe-estimated segments, the fallback */
+let TRAFFICASKED=new Set();       /* routes we have looked up, so "nothing found" is distinguishable */
+
+/* Fractions, not percentages. Checked against all 12,673 segments that carry
+   both a truck count and a share: 12,672 of them satisfy AADTT = AADT x share,
+   and 398 would satisfy AADTT = AADT x share / 100 — so dividing by a hundred
+   here would be wrong 99.99% of the time. The mean share is 7.2% and the
+   largest measured anywhere in the state is 43.9%. */
+const TRUCK_SHARE_MAX=0.45;
+const STALE_YEARS=6;              /* NCDOT's own longest collection cycle is six years */
+
+function segAt(list,mp){
+  if(!list||mp==null) return null;
+  for(const s of list){
+    const a=Number(s.begin_mp), b=Number(s.end_mp);
+    if(mp>=Math.min(a,b)-0.005 && mp<=Math.max(a,b)+0.005) return s;
+  }
+  return null;
+}
+
+/* The whole answer for one point on one route, with its provenance attached.
+   Nothing downstream is allowed to take the number without the rest of it. */
+function trafficAt(rid,mp){
+  if(!/^\d{11}$/.test(rid||'')||mp==null) return null;
+  const s=segAt(TRAFFIC.get(rid),mp);
+  if(s){
+    const share=(Number(s.su_pct)||0)+(Number(s.mu_pct)||0);
+    /* The station's current count is the total. The segment's own AADT is an
+       older year of the same station and is kept only to date the share. */
+    if(s.aadt!=null&&s.aadt_year!=null){
+      return {aadt:Number(s.aadt), year:Number(s.aadt_year),
+              aadtt: share>0? Math.round(Number(s.aadt)*share) : (s.segment_aadtt!=null?Number(s.segment_aadtt):null),
+              share: share>0? share : null,
+              shareYear: s.value_year==null?null:Number(s.value_year),
+              station:s.location_id, where:s.station_location, cycle:s.coll_cycle,
+              basis:'count', scaled: share>0,
+              segAadt:s.segment_aadt==null?null:Number(s.segment_aadt)};
+    }
+    /* A segment whose station has no series at all: report what the
+       segmentation holds and say it is undated rather than inventing a year. */
+    if(s.segment_aadt!=null)
+      return {aadt:Number(s.segment_aadt), year:s.value_year==null?null:Number(s.value_year),
+              aadtt:s.segment_aadtt==null?null:Number(s.segment_aadtt),
+              share: share>0?share:null, shareYear:s.value_year==null?null:Number(s.value_year),
+              station:s.location_id, where:s.station_location, cycle:s.coll_cycle,
+              basis:'segment', scaled:false, segAadt:Number(s.segment_aadt)};
+  }
+  const p=segAt(PROBE.get(rid),mp);
+  if(p&&p.estimated!=null)
+    return {aadt:Number(p.estimated), year:p.data_year==null?null:Number(p.data_year),
+            aadtt:null, share:null, shareYear:null, station:null, where:null, cycle:null,
+            basis:'probe', scaled:false,
+            lo:p.lo95==null?null:Number(p.lo95), hi:p.hi95==null?null:Number(p.hi95)};
+  return null;
+}
+
+/* One read per scope, scoped to the routes on screen — the same shape as
+   route_extents. The probe table is only asked about routes the counted data
+   did not cover, because it is twenty-five times the size and asking for
+   everything would be a statewide pull to answer a county's question. */
+async function loadTraffic(rids,onProgress){
+  const want=[...new Set((rids||[]).filter(r=>/^\d{11}$/.test(r||'')&&!TRAFFICASKED.has(r)))];
+  if(!want.length) return 0;
+  let got=0;
+  for(let i=0;i<want.length;i+=200){
+    const chunk=want.slice(i,i+200);
+    const rows=await sbAll('traffic_client?select=route_id,begin_mp,end_mp,tms_id,segment_aadt,'+
+      'segment_aadtt,su_pct,mu_pct,value_year,location_id,station_location,coll_cycle,aadt_year,aadt'+
+      '&route_id=in.'+sbIn(chunk));
+    rows.forEach(r=>{ if(!TRAFFIC.has(r.route_id)) TRAFFIC.set(r.route_id,[]);
+                      TRAFFIC.get(r.route_id).push(r); got++; });
+    chunk.forEach(r=>TRAFFICASKED.add(r));
+    if(onProgress) onProgress(Math.min(i+200,want.length),want.length);
+  }
+  const uncovered=want.filter(r=>!TRAFFIC.has(r));
+  for(let i=0;i<uncovered.length;i+=200){
+    const chunk=uncovered.slice(i,i+200);
+    try{
+      const rows=await sbAll('traffic_probe?select=route_id,begin_mp,end_mp,estimated,lo95,hi95,data_year'+
+        '&route_id=in.'+sbIn(chunk));
+      rows.forEach(r=>{ if(!PROBE.has(r.route_id)) PROBE.set(r.route_id,[]);
+                        PROBE.get(r.route_id).push(r); });
+    }catch(e){ /* the probe table may not be loaded yet; counted data still stands */ }
+  }
+  return got;
+}
+
+/* Attach to a feature. Kept separate from validateFeature so that a scope with
+   no traffic data loaded simply has no traffic findings, rather than a page of
+   findings about data nobody asked for. */
+function attachTraffic(b,f){
+  const rid=effRidF(b,f), mp=mp3(effMpF(b,f));
+  if(!/^\d{11}$/.test(rid||'')||mp===null){ f.tr=null; return f; }
+  if(!TRAFFICASKED.has(rid)){ f.tr=undefined; return f; }   /* not looked up yet */
+  f.tr=trafficAt(rid,mp);
+  return f;
+}
+
+/* The findings. Each one is a thing that is wrong or unknown about the traffic
+   items on THIS feature, and each says what to do about it. */
+function trafficFlags(b,f){
+  /* Re-attach every time rather than trusting a stamp: a corrected BH06 or BH07
+     moves the feature to a different stretch of road, and the traffic that goes
+     with it has to move too. The lookup is two map reads. */
+  attachTraffic(b,f);
+  const out=[], t=f.tr;
+  if(t===undefined) return out;                 /* not looked up: say nothing */
+  const rid=effRidF(b,f);
+  if(!/^\d{11}$/.test(rid||'')) return out;     /* no route: BH06 findings cover it */
+
+  if(!t){ out.push(f.loc==='B'?'AADT_NONE_BELOW':'AADT_NONE'); return out; }
+
+  if(t.basis==='probe') out.push('AADT_PROBE');
+  if(t.year!=null){
+    const now=new Date().getFullYear();
+    if(now-t.year>STALE_YEARS) out.push('AADT_STALE');
+  }else out.push('AADT_UNDATED');
+
+  if(t.aadtt!=null&&t.aadt!=null&&t.aadtt>t.aadt) out.push('AADTT_OVER');
+  else if(t.share!=null&&t.share>TRUCK_SHARE_MAX) out.push('AADTT_SHARE');
+
+  /* The published copy. Only meaningful on the feature that IS the bridge row,
+     because that is the only one NCDOT publishes an AADT for. */
+  if(isRowFeature(f)&&b.AADT!=null&&t.basis==='count'){
+    const yrs=(TRAFFIC.get(rid)||[]).filter(s=>s.location_id===t.station);
+    /* Does the published figure equal ANY year this station has recorded? The
+       series is not on the client, so the two we hold are the ones worth
+       testing: the current count and the segmentation's older value. */
+    const known=[t.aadt,t.segAadt].filter(v=>v!=null);
+    if(known.length&&!known.some(v=>Math.abs(v-Number(b.AADT))<=Math.max(50,v*0.005)))
+      out.push('AADT_PUBLISHED_ODD');
+  }
+  return out;
+}
+
+/* The pass. Runs over whatever is in scope, loads the routes it needs, and
+   re-validates so the new findings appear in the checklist and the counts. */
+async function trafficCheck(scope){
+  const list=scope||ALL;
+  const rids=new Set();
+  list.forEach(b=>{ featuresOf(b).forEach(f=>{ const r=effRidF(b,f);
+    if(/^\d{11}$/.test(r||'')) rids.add(r); }); });
+  if(!rids.size){ toast('Nothing in this scope has a route to look traffic up on.',4500); return; }
+  busy(true,'Traffic','reading counts for '+rids.size.toLocaleString()+' routes',5);
+  try{
+    await loadTraffic([...rids],(d,n)=>busy(true,'Traffic',d.toLocaleString()+' / '+n.toLocaleString()+' routes',d/n*100));
+  }catch(e){ busy(false); toast('Traffic data could not be read: '+(e.message||e),7000); return; }
+  list.forEach(b=>{ featuresOf(b).forEach(f=>attachTraffic(b,f)); rollUpFeatures(b); });
+  revalidate(); applyFilters(); busy(false);
+
+  const fs=list.flatMap(b=>featuresOf(b));
+  const withT=fs.filter(f=>f.tr), counted=withT.filter(f=>f.tr.basis==='count');
+  const probe=withT.filter(f=>f.tr.basis==='probe');
+  const years=counted.map(f=>f.tr.year).filter(y=>y!=null).sort((a,b)=>b-a);
+  toast('Traffic: '+withT.length.toLocaleString()+' of '+fs.length.toLocaleString()+' features have an AADT — '+
+    counted.length.toLocaleString()+' counted'+(years.length?' (most recent '+years[0]+')':'')+', '+
+    probe.length.toLocaleString()+' probe-estimated. '+
+    (fs.length-withT.length).toLocaleString()+' have none.',11000);
+}
+
+/* B.H.09, B.H.10 and B.H.11 in the feature card, beside BH06 and BH07 — they
+   belong to the same feature and are read in the same glance. Each one says
+   where it came from, because "18,000" and "18,000, counted in 2024 at station
+   0600000853" are not the same claim. */
+function trafficRows(b,f){
+  const t=f.tr;
+  if(t===undefined)
+    return '<dt>Traffic</dt><dd style="color:#5A5A5A;font-size:12px">not looked up &mdash; '+
+      'run <b>Traffic</b> in Settings, or open the bridge</dd>';
+  if(!t)
+    return '<dt>Traffic</dt><dd style="color:#C9A227;font-size:12px">no AADT covers this route at this '+
+      'milepoint</dd>';
+  const est=t.basis==='probe';
+  return '<dt>BH09 <span style="font-weight:400;color:#9A9A9A">AADT</span></dt><dd class="mono">'+
+      t.aadt.toLocaleString()+
+      (est?' <span style="color:#C9A227;font-weight:600">estimated</span>':'')+
+      (est&&t.lo!=null&&t.hi!=null
+        ? '<div style="color:#5A5A5A;font-size:11.5px">95% confidence '+t.lo.toLocaleString()+
+          ' to '+t.hi.toLocaleString()+' &mdash; probe data, not a count</div>'
+        : '<div style="color:#5A5A5A;font-size:11.5px">'+
+          (t.station?'counted at station '+esc(t.station)+(t.where?' &middot; '+esc(t.where):''):'from the segmentation')+
+          '</div>')+
+      '</dd>'+
+    '<dt>BH10 <span style="font-weight:400;color:#9A9A9A">trucks</span></dt><dd class="mono">'+
+      (t.aadtt==null
+        ? '<span style="color:#5A5A5A">none published for this road</span>'
+        : t.aadtt.toLocaleString()+
+          (t.share!=null?'<div style="color:#5A5A5A;font-size:11.5px">'+(t.share*100).toFixed(1)+
+            '% of the total'+(t.scaled?', a share measured'+(t.shareYear?' in '+t.shareYear:'')+
+            ' applied to the current count':'')+'</div>':''))+
+      '</dd>'+
+    '<dt>BH11 <span style="font-weight:400;color:#9A9A9A">year</span></dt><dd class="mono">'+
+      (t.year==null? '<span style="color:#CF3910">no year &mdash; the value cannot be dated</span>'
+                   : String(t.year)+
+        (t.cycle?'<div style="color:#5A5A5A;font-size:11.5px">station counts '+
+          ({O:'in odd years',E:'in even years',A:'every year',S:'on a six-year supplemental cycle'}[t.cycle]||'on cycle '+esc(t.cycle))+
+          '</div>':''))+
+      '</dd>'+
+    (isRowFeature(f)&&b.AADT!=null
+      ? '<dt>NCDOT</dt><dd class="mono" style="color:#5A5A5A">'+Number(b.AADT).toLocaleString()+
+        '<div style="font-size:11.5px">what the bridge record carries, with no year on it</div></dd>'
+      : '');
+}
+
 function validateFeature(b,f){
   if(isRowFeature(f)){
     /* Structure-level findings stay on the structure. Repeating them inside the
@@ -2423,6 +2677,9 @@ function validateFeature(b,f){
     f.flags=b._flags.filter(x=>!STRUCTONLY.includes(x)); f.sev=b._sev; f.rid=b.RTE_ID; f.mp=b.MP;
     /* BH06-4 by B.H.18: the value belongs to whichever structure carries it. */
     if(f.onBridge){ f.flags=f.flags.concat(['BH06_4_ONBRIDGE']); f.sev='e'; }
+    f.flags=f.flags.concat(trafficFlags(b,f));
+    if(f.flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='e')) f.sev='e';
+    else if(f.sev!=='e'&&f.flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='w')) f.sev='w';
     return f;
   }
   const flags=[], rid=effRidF(b,f), mp=effMpF(b,f), n=mp3(mp), d=decodeRID(rid);
@@ -2490,6 +2747,10 @@ function validateFeature(b,f){
     f.carriageway = !!(d0&&namedLabels.includes(d0.label));
     flags.push(f.carriageway?'FEATURE_CARRIAGEWAY':'FEATURE_NOT_NAMED');
   }
+
+  /* The traffic items ride on the same feature and fail in the same place, so
+     their findings join the rest rather than living in a second list. */
+  trafficFlags(b,f).forEach(x=>flags.push(x));
 
   f.flags=flags; f._dec=d;
   f.sev=flags.some(x=>RULEMAP[x]&&RULEMAP[x].sev==='e')?'e'
@@ -2790,6 +3051,13 @@ async function featuresOnOpen(bn){
   try{ await expandOne(b); }
   catch(e){ b._featErr=e.message||'the road network did not answer'; }
   b._featBusy=false;
+  /* The traffic items come with the features. Opening a bridge is the moment a
+     reviewer wants all of it, and it is one read for this structure's routes. */
+  try{
+    const rids=featuresOf(b).map(f=>effRidF(b,f)).filter(r=>/^\d{11}$/.test(r||''));
+    if(rids.length){ await loadTraffic(rids); featuresOf(b).forEach(f=>attachTraffic(b,f));
+                     rollUpFeatures(b); revalidate(); }
+  }catch(e){ /* traffic is additive: a structure still reviews without it */ }
   if(SEL===bn) drawDetail(b);
   renderTable();
 }
@@ -3053,8 +3321,18 @@ const COLS=[
  {k:'_bh06',t:'BH06 route ID',mono:1},{k:'_declab',t:'Decoded'},
  {k:'MP',t:'BH07 LRS milepoint',mono:1,num:1},{k:'_off',t:'Offset ft',mono:1,num:1},{k:'F_CARRIED',t:'Carried'},
  {k:'FTR_INTRSC',t:'Crossed'},
+ {k:'_aadt',t:'BH09 AADT',mono:1,num:1},{k:'_aadtt',t:'BH10 trucks',mono:1,num:1},
+ {k:'_aadty',t:'BH11 year',mono:1,num:1},
  {k:'_rev',t:'Review'},{k:'_stype',t:'Structure type'},{k:'_cond',t:'Cond D/Su/Sb'},
  {k:'_fix',t:'Suggested BH06 / BH07',mono:1},{k:'_flaglab',t:'Findings'}];
+
+/* The row's traffic is the row feature's traffic — the roadway the bridge
+   carries. Everything beneath it has its own, and that is in the panel, because
+   a table with one row per bridge has nowhere to put four of them. */
+function rowTraffic(b){
+  const f=(featuresOf(b)||[]).find(x=>isRowFeature(x));
+  return f&&f.tr?f.tr:null;
+}
 
 function cell(b,k){
   if(k==='_sevlab') return '<span class="badge b-'+({e:'err',w:'warn',i:'info',ok:'ok'}[b._sev])+'">'+SEVNAME[b._sev]+'</span>';
@@ -3083,6 +3361,13 @@ function cell(b,k){
     return esc(v);
   }
   if(k==='_stype') return b._snbi?esc(b._snbi.structure_type):'';
+  if(k==='_aadt'){ const t=rowTraffic(b); if(!t) return '';
+    return '<span'+(t.basis==='probe'?' style="color:#C9A227" title="probe estimate, not a count"':'')+'>'+
+      t.aadt.toLocaleString()+(t.basis==='probe'?' est':'')+'</span>'; }
+  if(k==='_aadtt'){ const t=rowTraffic(b); return t&&t.aadtt!=null?t.aadtt.toLocaleString():''; }
+  if(k==='_aadty'){ const t=rowTraffic(b); if(!t||t.year==null) return '';
+    const old=(new Date().getFullYear()-t.year)>STALE_YEARS;
+    return '<span'+(old?' style="color:#C9A227"':'')+'>'+t.year+'</span>'; }
   if(k==='_cond'){ if(!b._snbi) return '';
     const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(x=>b._snbi[x]==null?'-':b._snbi[x]);
     const mn=Math.min(...v.map(x=>parseInt(x,10)).filter(x=>!isNaN(x)));
@@ -3148,7 +3433,7 @@ function sortView(){
    Numeric columns take a comparison as well as a number: >100, <=0.5, 2-8. A
    milepoint filter that could only match exactly would be no use at all. */
 const COLF={};                       /* column key -> what the reviewer typed */
-const NUMCOL={MP:1,_off:1};
+const NUMCOL={MP:1,_off:1,_aadt:1,_aadtt:1,_aadty:1};
 
 function cellText(b,k){
   return String(cell(b,k)||'').replace(/<[^>]*>/g,' ')
@@ -3173,7 +3458,15 @@ function numMatch(expr,v){
   if(m) return v>=Number(m[1])&&v<=Number(m[2]);
   return true;                       /* half-typed: do not hide everything */
 }
-function numOf(b,k){ return k==='MP'?b._mp3 : k==='_off'?(b._off==null?null:b._off) : null; }
+function numOf(b,k){
+  if(k==='MP') return b._mp3;
+  if(k==='_off') return b._off==null?null:b._off;
+  if(k==='_aadt'||k==='_aadtt'||k==='_aadty'){
+    const t=rowTraffic(b); if(!t) return null;
+    return k==='_aadt'?t.aadt : k==='_aadtt'?t.aadtt : t.year;
+  }
+  return null;
+}
 
 function passesColumns(b){
   for(const k in COLF){
@@ -3348,6 +3641,7 @@ function featurePanel(b){
             esc(r.num||'—')+(r.dir?' · '+esc(r.dir):'')+
             (r.reportedDes&&r.reportedDes!==r.des?' <span style="color:#C9A227">(the report called this '+esc(r.reportedDes)+')</span>':''))
             .join('<br>')+'</dd>'+
+        trafficRows(b,f)+
       '</dl>'+
       (f.why?'<div style="font-size:11.5px;color:#5A5A5A;margin-bottom:5px">'+esc(f.why)+
         (f.confidence?' <b>'+esc(f.confidence)+' confidence</b>':'')+'</div>':'')+
@@ -3937,7 +4231,9 @@ async function diagnostics(){
 function exportCSV(){
   const cols=['BRDG_NBR','COUNTY','DIVISION','BH06_LRS_ROUTE_ID','BH07_LRS_MILEPOINT','BH07_SOURCE_VALUE',
     'VALIDATED_BH06','VALIDATED_BH07','VALUE_SOURCE','ROUTE_DECODED',
-    'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
+    'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT',
+    'BH09_AADT','BH10_AADTT','BH11_AADT_YEAR','AADT_BASIS','AADT_STATION','AADT_TRUCK_SHARE','AADT_SHARE_YEAR',
+    'AADT_PROBE_LO95','AADT_PROBE_HI95','NCDOT_RECORD_AADT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
@@ -3953,6 +4249,19 @@ function exportCSV(){
       /* OFFSET_FT was declared in the header and never emitted, which shifted every
          column after it left by one. Emitted now, in its declared position. */
       b._off==null?(b._offStale?'RE-LOCATE':''):b._off.toFixed(1),
+      /* The traffic items, and enough beside them to say what each one is. A
+         bare AADT column would reproduce exactly the problem this group was
+         added to fix: a number with no year and no provenance. */
+      (t=>t?t.aadt:'')(rowTraffic(b)),
+      (t=>t&&t.aadtt!=null?t.aadtt:'')(rowTraffic(b)),
+      (t=>t&&t.year!=null?t.year:'')(rowTraffic(b)),
+      (t=>t?({count:'COUNTED',segment:'SEGMENTATION',probe:'PROBE ESTIMATE'}[t.basis]||t.basis):'')(rowTraffic(b)),
+      (t=>t&&t.station?t.station:'')(rowTraffic(b)),
+      (t=>t&&t.share!=null?(t.share*100).toFixed(2):'')(rowTraffic(b)),
+      (t=>t&&t.shareYear!=null?t.shareYear:'')(rowTraffic(b)),
+      (t=>t&&t.lo!=null?t.lo:'')(rowTraffic(b)),
+      (t=>t&&t.hi!=null?t.hi:'')(rowTraffic(b)),
+      b.AADT==null?'':b.AADT,
       b.F_CARRIED,b.FTR_INTRSC,b.MAINT_RESP,b.FUNC_CLASS,b.LAT_DD,b.LONG_DD,
       (REVIEW.get(b.BRDG_NBR)||{}).status||'', (REVIEW.get(b.BRDG_NBR)||{}).note||'',
       (REVIEW.get(b.BRDG_NBR)||{}).by||'',
@@ -4100,6 +4409,7 @@ async function refreshCache(){
 $('mode').onchange=buildArg;
 $('run').onclick=runAll;
 $('deep').onclick=deepCheck;
+$('traffic').onclick=()=>trafficCheck();
 $('locate').onclick=locateCheck;
 $('resolve').onclick=resolveCarried;
 $('fillnull').onclick=deriveMissing;

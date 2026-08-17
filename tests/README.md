@@ -1,6 +1,6 @@
 # Tests
 
-Eight Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
+Nine Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
 service and all six tile hosts — so none of them needs network access, and none of
 them can pass because a live service happened to answer.
 
@@ -14,6 +14,7 @@ node tests/features.test.js    dist/NCDOT_BH06_BH07_Validator.html
 node tests/columns.test.js     dist/NCDOT_BH06_BH07_Validator.html
 node tests/field.test.js       dist/NCDOT_BH06_BH07_Validator.html
 node tests/approvals.test.js   dist/NCDOT_BH06_BH07_Validator.html
+node tests/traffic.test.js     dist/NCDOT_BH06_BH07_Validator.html
 ```
 
 Each takes a build as its argument and should pass on all three: `dist/`, the
@@ -144,14 +145,37 @@ rather than an HTTP code. It also pins the thing that made the view feel broken:
 running a scope while the queue is open now leaves it, instead of filling a table
 nobody can see.
 
-`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all eight. It
+`traffic.test.js` covers B.H.09, B.H.10 and B.H.11. The claim under test is not
+"an AADT appears" — it is that the number is the **current counted** one, that it
+says which year it was counted, that the truck figure is a *share* applied to
+that current total rather than an older count carried forward, and that where
+nothing was counted the estimate says so and carries its 95% interval. That
+distinction is the whole point: the thing being replaced, the AADT on NCDOT's
+bridge record, looks identical on screen and is none of those things.
+
+One assertion earns its place on its own. `su_pct` and `mu_pct` are **fractions**,
+not percentages — checked against all 12,673 NCDOT segments carrying both a truck
+count and a share, 12,672 satisfy `AADTT = AADT x share` and only 398 would
+satisfy `AADT x share / 100`. A stray division by a hundred would look like a
+small number on one bridge and be wrong by two orders of magnitude statewide, so
+the suite asserts the share is treated as a fraction *and* that the resulting
+B.H.10 lands in the thousands rather than the hundreds.
+
+It also pins the per-feature shape — the roadway beneath reports its own AADT
+from its own station, not the bridge's — the four findings, the two arithmetic
+checks, that correcting BH07 moves the traffic to the segment the new milepoint
+falls in rather than serving a cached value, and that the CSV carries the basis,
+the station, the share and its year beside each number, because a bare AADT
+column would reproduce exactly the problem the group was added to fix.
+
+`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all nine. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals — 349 in all.
+**49** approvals, **48** traffic — 397 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

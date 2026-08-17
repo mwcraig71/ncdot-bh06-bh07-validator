@@ -121,9 +121,18 @@ module.exports = function sbmock(page, opts = {}) {
   const proposal_queue = opts.queue || [];
   const approver_directory = opts.directory || [];
 
+  /* Traffic. traffic_client is one row per stretch of road carrying its
+     station's current count beside the segmentation's older value; traffic_probe
+     is the modelled fallback. Both are read by route, so the fixtures are just
+     rows and the milepoint containment happens in the browser, which is where it
+     happens for real. */
+  const traffic_client = opts.traffic || [];
+  const traffic_probe  = opts.probe   || [];
+
   const TABLES = { county_geojson, structure_snbi: snbi, route_extents: extents,
                    hpms_routes: hpms, data_vintage: vintage,
-                   proposal_queue, approver_directory };
+                   proposal_queue, approver_directory,
+                   traffic_client, traffic_probe };
 
   return page.route(SB + '/rest/v1/**', async route => {
     const req = route.request();
@@ -171,7 +180,7 @@ module.exports = function sbmock(page, opts = {}) {
     if (opts.fail && opts.fail === table) return J({ message: 'boom' }, 500);
     return J(rows.slice(offset, offset + limit));
   }).then(() => ({ log, SB, county_geojson, snbi, extents, hpms, vintage,
-                   proposal_queue, approver_directory,
+                   proposal_queue, approver_directory, traffic_client, traffic_probe,
                    /* helpers the suites read */
                    reads: t => log.filter(x => x.table === t),
                    rpcs: () => log.filter(x => x.rpc),

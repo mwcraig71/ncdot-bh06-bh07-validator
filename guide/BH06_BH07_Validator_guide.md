@@ -614,6 +614,80 @@ it. Confirm those before they go anywhere.
 
 ---
 
+## Traffic — B.H.09, B.H.10 and B.H.11
+
+The tool now derives the three traffic items for **every feature**, not from the bridge record
+but from NCDOT's own count data.
+
+### Why not the bridge record
+
+Because it is a copy with the year taken off. Measured in Mecklenburg: of 355 structures that
+carry an AADT and have a count station on the same route within half a mile, **295 — 83% —
+equal the station's value exactly**, median difference 0.0%. NCDOT's bridge AADT *is* the
+station number. What it does not carry is **which year**, and that is the whole of B.H.11.
+It is also missing entirely on **11,016 of 23,022** structures.
+
+### Where each number comes from
+
+**B.H.09 — AADT.** The count station governing that stretch of road, at its most recent year.
+48,687 stations statewide, keyed on the 11-digit LRS Route ID — the same key BH06 uses — with a
+value per year from 2002 to 2024. Two-way totals, all lanes both directions.
+
+**B.H.10 — truck AADT.** There is no dated truck series anywhere in NCDOT's published data;
+trucks exist only on the segmentation, at a vintage that varies segment by segment. So the truck
+*count* is not carried forward — the truck **share** is, applied to the current total. The panel
+says so explicitly: *"a share measured in 2022 applied to the current count"*. Share moves far
+more slowly than volume, and the year the share came from is recorded on every value.
+
+**B.H.11 — year.** The year that count was actually taken. Not inferred, not assumed from a
+release note — read from the station's own series.
+
+**Where no station governs the road**, the figure comes from NCDOT's probe-estimated layer —
+1.2 million segments on the same route and milepoint system — and it is reported as an estimate
+with its **95% confidence interval** beside it, never as a count. Two thirds of Mecklenburg's
+structures are in this position, so the alternative to an honest estimate is a blank.
+
+### What it covers, statewide
+
+Of 19,627 carried features with a valid route and milepoint:
+
+| | |
+|---|---|
+| a **counted** AADT | 11,584 — and 11,576 of those are 2023 or later |
+| a probe estimate | 6,617 |
+| nothing at all | 1,426 |
+| had an AADT on the bridge record, undated | 11,979 |
+
+### The findings
+
+- **No AADT for this carried roadway** — nothing covers this route at this milepoint. Check
+  BH06 and BH07 first: the lookup uses the same route and measure everything else validates, so
+  a missing AADT is often a wrong milepoint.
+- **No AADT for the roadway beneath** — same, worded for a below feature, where the items
+  describe the traffic *under* the bridge.
+- **AADT is a probe estimate, not a count** — a note, not a fault.
+- **The most recent count is old** — no count within six years, which is NCDOT's own longest
+  collection cycle, so it is not simply an off-year in a rota.
+- **AADT with no year** — a value that dates to nothing. This is precisely what the bridge
+  record already carries, and the reason for the whole group.
+- **Truck AADT exceeds total** — arithmetic, and an error.
+- **Implausible truck share** — above 45%. The mean across all 12,673 NCDOT segments carrying
+  both a truck count and a share is 7.2%, and the highest anywhere in the state is 43.9%.
+- **NCDOT's published AADT matches no count here** — the copy matches neither the current count
+  nor the older figure the segmentation holds, so it came from somewhere unaccounted for.
+
+### Running it
+
+**Run all checks** does it. To re-run on its own, **Traffic** in Settings. Opening a bridge pulls
+the traffic for its own routes, so the panel is complete the moment you look at it. The switch
+**Derive the traffic items** turns the automatic pass off.
+
+The three items appear in the feature card beside BH06 and BH07, as three table columns, and in
+the CSV — with `AADT_BASIS`, `AADT_STATION`, `AADT_TRUCK_SHARE`, `AADT_SHARE_YEAR`, the probe
+interval, and `NCDOT_RECORD_AADT` beside them, so the export says where every number came from.
+
+---
+
 ## Approvals — deciding what the field submitted
 
 Everything an inspector submits from a phone is a **proposal**. It changes nothing until
