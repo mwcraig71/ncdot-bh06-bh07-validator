@@ -748,6 +748,37 @@ a withdrawn feature takes its clearances and its traffic with it.
 A removal is accepted or refused on its own. Accepting **withdraws** the feature rather than
 deleting it, so the record of what was reported and who removed it survives.
 
+### Setting up the first administrator
+
+There are no accounts until somebody signs in — signing in is what creates one — so the very
+first approver is made in two steps, in this order.
+
+**1. Sign in to the tool, on the published site.** Open
+`https://mwcraig71.github.io/ncdot-bh06-bh07-validator/`, go to **Settings → Reviewer**, enter
+your work email and press **Email me a sign-in link**. Click the link in the email. That creates
+your account.
+
+> **It has to be the website, not the local HTML file.** A sign-in link can only return you to an
+> `http(s)` address, so signing in from a file on your desktop cannot complete. Once your account
+> exists you can use either build; it is only the first sign-in that needs the site. The site
+> address also has to be listed under **Authentication → URL Configuration → Redirect URLs** in
+> the Supabase dashboard, or the link will bounce you to the wrong place.
+
+**2. Make yourself an approver.** In the Supabase dashboard, open the **SQL Editor** and run:
+
+```sql
+select grant_approver('you@ncdot.gov');
+```
+
+That is the whole of it. It refuses if the address has never signed in, which is the check that
+makes step 1 first rather than optional.
+
+The SQL editor is allowed to do this because it is a direct database session and carries no JWT
+at all. No browser can present an absent claim — a signed-out visitor sends `anon`, a signed-in
+one sends `authenticated` — so this route is only open to somebody already holding the
+database's own credentials. **After this you never need the SQL editor again:** every later
+approver is appointed from the Approvals screen by an existing one.
+
 ### Approvers
 
 The bottom of the screen lists who currently holds the role, when it was granted and by whom,
