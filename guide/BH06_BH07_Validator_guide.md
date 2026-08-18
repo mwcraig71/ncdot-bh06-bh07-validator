@@ -119,8 +119,9 @@ data, fetch NC's HPMS submittal from FHWA, then Deep check, Locate check, Resolv
 Fill missing. A county takes about ten seconds. When it finishes you get one summary line and a
 fully populated table.
 
-**Pin drop** lives on the map, top centre — arm it and click anywhere to read the route and
-milepoint at that spot. Read the label carefully: it reports **the road at the point you
+**Pin drop** lives on the map, top centre — arm it and click anywhere to read the route,
+milepoint **and traffic** at that spot: BH09, BH10 and BH11 for the road you clicked, from the
+same count stations the rest of the tool uses. Read the label carefully: it reports **the road at the point you
 clicked**, which at a grade separation is usually the road *underneath*, not the road the bridge
 carries. If a bridge is open, the popup says which of that bridge's features the road you clicked
 actually is — so a milepoint of 46.958 in the popup and 2.672 in the panel is not a contradiction,
@@ -283,6 +284,14 @@ thousand routes and will ask you to confirm first.
 `IdentifyRouteMilepostUsingPointTool` — the same drop-a-pin capability TxDOT's map has, which
 NCDOT already publishes but does not surface in its viewer. You get the route ID, the
 milepoint to three decimals, and any concurrent routes at that point.
+
+**It also reports the traffic there.** BH09, BH10 and BH11 for the stretch of road under the
+point — the counting station and the year, or the probe estimate with its 95% interval, or a
+plain statement that nothing covers that point. They are the same three items every feature
+carries, because a pin drop and a feature are both asking about a stretch of road.
+
+When the pin is aimed at a feature, the confirmation card shows that traffic **before** you
+accept, since accepting the road accepts its traffic items too.
 
 **One caution, shown in the popup every time:** it returns the *nearest* route. At a grade
 separation that is usually the road **underneath**. BH06 must be the route **carried on** the

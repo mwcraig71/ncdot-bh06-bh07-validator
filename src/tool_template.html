@@ -2661,6 +2661,29 @@ function trafficRows(b,f){
       : '');
 }
 
+/* The same three items, in the popup's own idiom. Short, because a popup is
+   read standing up: the number, the year it was counted, and whether it was
+   counted at all. */
+function trafficPop(t){
+  if(!t) return '<div class="pop-k" style="margin-top:7px;color:#C9A227">No AADT covers this point &mdash; '+
+    'no count station governs it and no estimate reaches it.</div>';
+  const est=t.basis==='probe';
+  return '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px">'+
+      'Traffic here'+(est?' &mdash; <b style="color:#C9A227">estimated</b>':'')+'</div>'+
+    '<div class="pop-v" style="font-size:15px">'+t.aadt.toLocaleString()+
+      ' <span style="font-size:11px;color:#5A5A5A">AADT (BH09)</span></div>'+
+    (est&&t.lo!=null&&t.hi!=null
+      ? '<div class="pop-k">95% confidence '+t.lo.toLocaleString()+' to '+t.hi.toLocaleString()+
+        ' &mdash; probe data, not a count</div>'
+      : '<div class="pop-k">'+(t.station?'counted at station '+esc(t.station):'from the segmentation')+'</div>')+
+    (t.aadtt!=null
+      ? '<div class="pop-k" style="margin-top:4px">'+t.aadtt.toLocaleString()+' trucks (BH10)'+
+        (t.share!=null?' &middot; '+(t.share*100).toFixed(1)+'% of the total':'')+'</div>'
+      : '<div class="pop-k" style="margin-top:4px">no truck count published for this road</div>')+
+    '<div class="pop-k">'+(t.year==null?'<span style="color:#CF3910">no year &mdash; the value cannot be dated</span>'
+                                       :'counted in '+t.year+' (BH11)')+'</div>';
+}
+
 function validateFeature(b,f){
   if(isRowFeature(f)){
     /* Structure-level findings stay on the structure. Repeating them inside the
@@ -3669,6 +3692,15 @@ function featurePanel(b){
           (PENDPIN.dec?'<div style="font-size:11.5px">'+esc(PENDPIN.dec.prefix+'-'+PENDPIN.dec.num+
             ' · '+PENDPIN.dec.invName+' · '+PENDPIN.dec.cntyName+' County')+'</div>':'')+
           (PENDPIN.name?'<div style="font-size:11.5px">'+esc(PENDPIN.name)+'</div>':'')+
+          /* The traffic that would come with it. Accepting a road accepts its
+             B.H.09/10/11 too, so they are shown before the yes, not after. */
+          (PENDPIN.tr
+            ? '<div style="font-size:11.5px;margin-top:4px">'+
+              PENDPIN.tr.aadt.toLocaleString()+' AADT'+
+              (PENDPIN.tr.basis==='probe'?' (estimated)':'')+
+              (PENDPIN.tr.aadtt!=null?' &middot; '+PENDPIN.tr.aadtt.toLocaleString()+' trucks':'')+
+              (PENDPIN.tr.year!=null?' &middot; counted '+PENDPIN.tr.year:'')+'</div>'
+            : '<div style="font-size:11.5px;color:#C9A227;margin-top:4px">no AADT covers this point</div>')+
           '<div style="font-size:11.5px;color:#5A5A5A;margin:5px 0 7px">This is the route '+
           '<b>nearest</b> the point you tapped, measured on NCDOT\u2019s LRS. Where roads stack at an '+
           'interchange the nearest one is often not the one you meant, so nothing is written until '+
@@ -4069,6 +4101,16 @@ async function pinAt(lat,lon){
     if(!a) { toast('No NCDOT route found at that point.',4000); return; }
     const at=a.attributes, d=decodeRID(at.RID);
     const conc=[2,3,4,5,6].map(i=>at['Route'+i]).filter(Boolean);
+    /* The pin already holds the only two things a traffic lookup needs — a route
+       and a measure on it — so the same three items every feature carries are
+       available for the point that was clicked, and for the same reason: this is
+       a stretch of road, and B.H.09/10/11 describe stretches of road. One read,
+       and only when the route is not already held. */
+    let ptr=null;
+    if(/^\d{11}$/.test(at.RID||'')&&at.MEAS!=null){
+      try{ await loadTraffic([at.RID]); }catch(e){}
+      ptr=trafficAt(at.RID,mp3(at.MEAS));
+    }
     /* This popup answers "what road is at this spot", which at a grade separation
        is usually NOT the road the selected bridge carries. It used to label its
        answer "BH06 LRS Route ID", which read as though it were reporting the
@@ -4097,7 +4139,7 @@ async function pinAt(lat,lon){
          tapping. */
       if(f) PENDPIN={bn:tgt.BRDG_NBR, des:f.des, rid:at.RID,
                      mp:Math.round(Number(at.MEAS)*1000)/1000,
-                     name:at.StreetName||at.RouteName||'', dec:d};
+                     name:at.StreetName||at.RouteName||'', dec:d, tr:ptr};
       PINTARGET=null;
       if(f){
         /* And put the panel back. On the phone it was closed to reach the map,
@@ -4120,6 +4162,7 @@ async function pinAt(lat,lon){
         (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
       (at.StreetName?'<div class="pop-k" style="margin-top:7px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
       (conc.length?'<div class="pop-k" style="margin-top:7px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
+      trafficPop(ptr)+
       '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px;line-height:1.45">'+
       (sel
         ? (hit

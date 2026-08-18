@@ -50,6 +50,9 @@ const PROBE=()=>[
   {route_id:NC51, begin_mp:0, end_mp:30, estimated:3380, lo95:2400, hi95:5200, data_year:2023},
 ];
 
+/* what the mocked pin tool answers with; the suite moves it between cases */
+let PINRID=I485N, PINMP=45;
+
 const mk=async(b,opts={})=>{
   const ctx=await b.newContext({viewport:{width:1600,height:1000}});
   const p=await ctx.newPage();
@@ -69,6 +72,13 @@ const mk=async(b,opts={})=>{
       const off=Number(pp.get('resultOffset')||par.get('resultOffset')||0);
       return J(off>0?{features:[]}:FX.bridges); }
     if(u.includes('RoadCharacteristics')) return J({features:[]});
+    /* NCDOT's route/milepost tool: submit, poll, read. The pin is the only way
+       into the tool that starts from a POINT rather than from a bridge record,
+       so the traffic lookup has to work from what it returns. */
+    if(u.includes('submitJob')) return J({jobId:'j1',jobStatus:'esriJobSubmitted'});
+    if(/\/jobs\/j1\?/.test(u)) return J({jobId:'j1',jobStatus:'esriJobSucceeded'});
+    if(u.includes('IdentifyRouteMPResults')) return J({value:{features:[{attributes:
+      {RID:PINRID, MEAS:PINMP, RouteName:'I-485', StreetName:'W I-485 Inner Hy'}}]}});
     return J({features:[]});
   });
   const m=await sbmock(p,Object.assign({bridges:FX.bridges,snbi:FX.snbi.map(x=>Object.assign({},x)),
@@ -301,7 +311,63 @@ const boot=async p=>{
      r668[cols.indexOf('AADT_BASIS')]+' '+r668[cols.indexOf('AADT_PROBE_LO95')]+
      '-'+r668[cols.indexOf('AADT_PROBE_HI95')],'PROBE ESTIMATE 2400-5200');
 
-  console.log('\n11. The reads are scoped, and asked for once');
+  console.log('\n11. The pin drop reports the three items for the point clicked');
+  PINRID=I485N; PINMP=45;
+  await p.evaluate(()=>{PINTARGET=null; SEL=null;});
+  await p.evaluate(()=>pinAt(35.24,-80.96));
+  await p.waitForFunction(()=>!!document.querySelector('.leaflet-popup-content'),null,{timeout:30000});
+  const pop=await p.evaluate(()=>document.querySelector('.leaflet-popup-content').innerText);
+  console.log('   '+pop.replace(/\n+/g,' | ').slice(0,190));
+  ok('the popup carries BH09',/104,000 AADT \(BH09\)/.test(pop),true);
+  ok('...BH10',/5,408 trucks \(BH10\)/.test(pop),true);
+  ok('...and BH11, as the year it was counted',/counted in 2024 \(BH11\)/.test(pop),true);
+  ok('...and says which station it came from',/station 0600000260/.test(pop),true);
+  ok('the road and the milepoint are still the headline',
+     /10800485060/.test(pop)&&/45\.000/.test(pop),true);
+
+  /* A point on a road no station governs: the estimate, with its interval. */
+  PINRID=NC51; PINMP=5;
+  await p.evaluate(()=>{map.closePopup();});
+  await p.evaluate(()=>pinAt(35.12,-80.70));
+  await p.waitForFunction(()=>{const n=document.querySelector('.leaflet-popup-content');
+    return n&&/3,380/.test(n.innerText);},null,{timeout:30000});
+  const pop2=await p.evaluate(()=>document.querySelector('.leaflet-popup-content').innerText);
+  ok('a probe-covered point says the figure is estimated',/estimated/i.test(pop2),true);
+  ok('...and prints the interval rather than the bare number',
+     /95% confidence 2,400 to 5,200/.test(pop2),true);
+
+  /* And a road with nothing at all says so, rather than showing an empty slot. */
+  PINRID='55555555555'; PINMP=1;
+  await p.evaluate(()=>{map.closePopup();});
+  await p.evaluate(()=>pinAt(35.13,-80.71));
+  await p.waitForFunction(()=>{const n=document.querySelector('.leaflet-popup-content');
+    return n&&/No AADT covers this point/.test(n.innerText);},null,{timeout:30000});
+  ok('a point with no traffic data says so',true,true);
+
+  console.log('\n11b. Confirming a pin shows the traffic it would bring with it');
+  PINRID=I485N; PINMP=45;
+  await p.evaluate(()=>{map.closePopup();});
+  const conf=await p.evaluate(async()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    const f=featuresOf(b).find(z=>z.loc==='B');
+    SEL='590819'; PINTARGET={bn:'590819',des:f.des};
+    await pinAt(35.24,-80.96);
+    return {tr:PENDPIN&&PENDPIN.tr?PENDPIN.tr.aadt:null,
+            txt:document.getElementById('dr-body').innerText};});
+  ok('the confirmation card carries the AADT the road would bring',conf.tr,104000);
+  ok('...printed before the yes, not after it',
+     /104,000 AADT/.test(conf.txt)&&/is this the road you meant/i.test(conf.txt),true);
+  ok('...with the trucks and the year beside it',
+     /5,408 trucks/.test(conf.txt)&&/counted 2024/.test(conf.txt),true);
+  const took=await p.evaluate(()=>{
+    document.querySelector('a.pinyes').click();
+    const b=ALL.find(x=>x.BRDG_NBR==='590819');
+    const f=featuresOf(b).find(z=>z.rid==='10800485060');
+    return f&&f.tr?{aadt:f.tr.aadt,year:f.tr.year}:null;});
+  ok('and accepting it carries the traffic onto the feature',
+     took?took.aadt+'@'+took.year:'',"104000@2024");
+
+  console.log('\n12. The reads are scoped, and asked for once');
   const reads=m.reads('traffic_client');
   ok('traffic is read by route, not wholesale',
      reads.length>0&&reads.every(r=>/route_id=in\./.test(r.url)),true);

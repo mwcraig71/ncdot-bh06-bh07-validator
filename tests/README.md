@@ -168,6 +168,14 @@ falls in rather than serving a cached value, and that the CSV carries the basis,
 the station, the share and its year beside each number, because a bare AADT
 column would reproduce exactly the problem the group was added to fix.
 
+Its last sections drive the pin, through NCDOT's route/milepost tool mocked in
+its three parts, and assert that the popup reports B.H.09, B.H.10 and B.H.11 for
+the point clicked — with the station on a counted road, the 95% interval on a
+probe-covered one, and a plain refusal where nothing reaches. A pin drop and a
+feature are the same question about the same stretch of road, so they get the
+same answer. The confirmation card shows that traffic before the yes, and
+accepting carries it onto the feature.
+
 `fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all nine. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
@@ -175,7 +183,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **48** traffic — 397 in all.
+**49** approvals, **60** traffic — 409 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.
