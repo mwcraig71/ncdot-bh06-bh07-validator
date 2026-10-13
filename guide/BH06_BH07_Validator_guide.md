@@ -697,6 +697,78 @@ interval, and `NCDOT_RECORD_AADT` beside them, so the export says where every nu
 
 ---
 
+## Detour length — B.H.17, and the detour as measured
+
+B.H.17 is NCDOT's coded detour length. The tool shows it **beside a detour measured on the road
+network**, and keeps the two apart, so where they disagree you can see it.
+
+### What is measured
+
+For every bridge, culvert and pipe, 19,676 structures, on a road graph built from the
+OpenStreetMap extract of 12 October 2026:
+
+- **The road on the bridge.** The deck is closed and the road beneath is left open, so a detour
+  may drop down, pass under and come back up. The figure is the shortest way from one side to the
+  other.
+- **Each road beneath**, wherever NCDOT records a highway under the structure. The ground under
+  the span is closed and the deck left open, so a detour may cross on the bridge where a ramp
+  connects them.
+
+Minimum distance only. Nothing on the way around is checked for clearance, posting or width. That
+is a separate question, B.H.12 to B.H.16.
+
+### Reading the code
+
+B.H.17 is in **miles**. Measured against 15,385 structures, reading the code as miles fits better
+than reading it as kilometres on 89% of them (95% for bridges alone; culverts are mostly short
+detours, where the two readings are close), and from code 10 upward the median measured-to-coded
+ratio is 1.03. Three codes are not distances: **0** means a bypass at the site, **99** is NCDOT's
+no-detour code, and **199** appears once with no published meaning. The tool labels them as codes
+and never reads them as miles.
+
+### What every answer can be
+
+- **A distance**: extra miles with the closure, with the path around and the way straight across
+  beside it.
+- **A way past at the site**: closing it costs next to nothing.
+- **No detour**: the far side is reachable only over this structure. This is an answer, not a
+  failure, and it agrees with NCDOT's 99 on 64% of the structures coded 99.
+- **Not measured**, with the reason. This is 1.1% of structures.
+- **Not in the run**: railroad bridges, walkways and signs, which carry no road.
+
+A blank is never a zero. In the CSV a dead end is `NO DETOUR` with the distance columns empty.
+
+Two flags say how a value was got. **Deck inferred**: the map has the road but does not mark the
+bridge on it, so the nearest road segment was closed instead. That's common for small creek
+crossings and nearly universal for culverts. **Deck width assumed**: NCDOT publishes no deck width,
+so 30 ft was used.
+
+### The findings
+
+- **B.H.17 gives a detour, but there is no other way across**: a warning. The bridge is the only
+  way to the far side.
+- **Coded "no detour" (99), but a way around exists**: a warning.
+- **Coded "bypass at the site" (0), but the measured detour is long**: a warning, at more than 2
+  miles.
+- **B.H.17 differs from the measured detour**: a note only, when the gap is both more than half and
+  more than 5 miles. It is commonest on code 1, which sits on 36% of structures and behaves like a
+  default: measured detours there run a median 2.3 times the code.
+
+### Where it shows
+
+A **Detour length** section in the bridge panel, after the features: the code first, then the road
+on the bridge, then each road beneath by name. Two table columns, **BH17 coded** and **Detour
+measured**, both numeric for filtering and sorting: `>10` finds long detours, and `-` finds the
+ones with nothing measured. The CSV has `BH17_NCDOT_CODE`, `BH17_MEANING`, `DETOUR_MEASURED`,
+`DETOUR_AROUND_MI`, `DETOUR_ADDITIONAL_MI`, `DETOUR_NOTE`, `DETOUR_BENEATH` and `DETOUR_GRAPH`.
+A pin dropped on an open bridge's carried road shows that bridge's detour. Dropped on a road
+beneath it, the pin shows the detour for that road closing instead.
+
+**Run all checks** reads the detour lengths for the scope automatically, and opening a bridge reads
+its own. It is one read per 200 structures, so there is no switch for it.
+
+---
+
 ## Approvals — deciding what the field submitted
 
 Everything an inspector submits from a phone is a **proposal**. It changes nothing until

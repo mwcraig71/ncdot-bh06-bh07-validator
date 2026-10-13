@@ -1,0 +1,17 @@
+{
+  "name": "ncdot-bh06-bh07-validator",
+  "private": true,
+  "description": "Build and test dependencies, pinned exactly: these versions reproduce the shipped builds byte for byte.",
+  "scripts": {
+    "build": "cd src && python3 build.py && cp NCDOT_BH06_BH07_Validator.html NCDOT_BH06_BH07_Validator_artifact.html ../dist/ && cp web/index.html ../docs/index.html"
+  },
+  "dependencies": {
+    "leaflet": "1.9.4",
+    "@supabase/supabase-js": "2.112.3",
+    "@fontsource/oswald": "5.3.0",
+    "@fontsource/open-sans": "5.3.0"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}

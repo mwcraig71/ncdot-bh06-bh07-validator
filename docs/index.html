@@ -753,7 +753,7 @@ const ROADCHAR=SVC+'/NCDOT_RoadCharacteristicsQtr/MapServer/0';
 const COUNTYBDY=SVC+'/NCDOT_CountyBdy_Poly/MapServer/0';
 const STRUCT=SVC+'/NCDOT_Structures/NCDOT_DynamicStructures/MapServer';
 const GPTOOL=SVC+'/NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool';
-const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,RD_ANGLE,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT';
+const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,RD_ANGLE,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT,DETOUR_LEN';
 
 const CLASS={'1':{p:'I',n:'Interstate'},'2':{p:'US',n:'US Route'},'3':{p:'NC',n:'NC Route'},
   '4':{p:'SR',n:'Secondary route'},'5':{p:'NS',n:'Non-system (municipal/private)'},
@@ -861,7 +861,16 @@ const RULES=[
  {id:'AADTT_SHARE', grp:'qc', sev:'w', t:'Implausible truck share',
   d:'The truck share here is above 45%. Measured across all 12,673 NCDOT segments that carry both a truck count and a share, the mean is 7.2% and the highest anywhere in the state is 43.9% \u2014 so this is outside the observed range and worth confirming before it is submitted.'},
  {id:'AADT_PUBLISHED_ODD', grp:'qc', sev:'w', t:'NCDOT\u2019s published AADT matches no count here',
-  d:'The AADT on the bridge record is normally a copy of the governing station\u2019s value \u2014 in Mecklenburg 83% of them match exactly. This one matches neither the current count nor the older figure the segmentation holds, so it came from somewhere unaccounted for. It carries no year, so there is no way to tell which year it was meant to be.'}
+  d:'The AADT on the bridge record is normally a copy of the governing station\u2019s value \u2014 in Mecklenburg 83% of them match exactly. This one matches neither the current count nor the older figure the segmentation holds, so it came from somewhere unaccounted for. It carries no year, so there is no way to tell which year it was meant to be.'},
+ /* ---------------- detour: B.H.17 against the measured detour ---------------- */
+ {id:'DETOUR_CODED_DEAD_END', grp:'qc', sev:'w', t:'B.H.17 gives a detour, but there is no other way across',
+  d:'NCDOT codes a detour length for this structure, but on the road network the far side is reachable only over this bridge: with the deck closed, nothing connects the two sides. Either the coded detour uses a road the map does not have \u2014 private, gated or seasonal \u2014 or the code is a default rather than a measurement. 377 structures statewide are in this position.'},
+ {id:'DETOUR_99_MEASURED', grp:'qc', sev:'w', t:'Coded \u201cno detour\u201d (99), but a way around exists',
+  d:'NCDOT uses 99 here. On most structures that matches a measured dead end \u2014 1,005 of 1,579 statewide \u2014 but on this one the road network does have a way around, and its length is in the panel. Either 99 means more than \u201cno detour\u201d to NCDOT, or the way around uses roads NCDOT does not count.'},
+ {id:'DETOUR_0_LONG', grp:'qc', sev:'w', t:'Coded \u201cbypass at the site\u201d (0), but the measured detour is long',
+  d:'Code 0 means traffic can get past at the structure itself. With this deck closed, the shortest way around on the road network adds more than 2 miles, so no bypass at the site is visible. A temporary or unmapped crossing would explain it; otherwise the code is wrong.'},
+ {id:'DETOUR_FAR_OFF', grp:'note', sev:'i', t:'B.H.17 differs from the measured detour',
+  d:'The coded detour and the measured one differ by more than half and by more than 5 miles. From code 10 upward the two agree to a median within 3% statewide, so a gap this size is worth a look. It is commonest on code 1, which sits on 36% of structures and behaves like a default: measured detours there run a median 2.3 times the code.'}
 ];
 const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
 const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
@@ -1086,6 +1095,10 @@ function validate(b){
      mistaken for a clean published one, and so corrections can be filtered and
      audited as a group. */
   if(b._src==='REVIEWED') flags.push('REVIEWED_VALUE');
+
+  /* B.H.17 against the measured detour - a property of the structure, so it
+     sits with the structure's findings, not inside a feature card. */
+  detourFlags(b).forEach(x=>flags.push(x));
 
   const sev=flags.some(f=>RULEMAP[f].sev==='e')?'e'
            :flags.some(f=>RULEMAP[f].sev==='w')?'w'
@@ -1472,6 +1485,8 @@ async function runAll(){
     if($('autohpms').checked) await fetchHPMS($('mode').value==='all' ? null : neededFips());
     await deepCheck();
     if($('autotraffic')&&$('autotraffic').checked) await trafficCheck();
+    /* Detour lengths are one read per 200 structures, so they always come. */
+    await detourCheck(null,true);
     if($('autoheavy').checked){
       const heavy = n>2500
         ? confirm(n.toLocaleString()+' structures. The per-structure passes (Locate, Resolve carried, '+
@@ -2690,6 +2705,175 @@ function trafficPop(t){
                                        :'counted in '+t.year+' (BH11)')+'</div>';
 }
 
+/* ==========================================================================
+   DETOUR LENGTH — B.H.17 as NCDOT publishes it, beside the detour as measured
+   --------------------------------------------------------------------------
+   Two different things, kept side by side so they can disagree in plain view:
+
+   B.H.17  NCDOT's coded value, read off the bridge layer as DETOUR_LEN. It is
+           in MILES - measured against 15,385 bridges, culverts and pipes, the
+           miles reading is the closer one on 89% of them (95% for bridges
+           alone), and from code 10 upward the median measured/coded ratio is 1.03. 0 means a bypass at the
+           site; 99 is NCDOT's no-detour code; 199 appears once and its meaning
+           is not published.
+
+   measured  detour_measured, from a routing graph built on OpenStreetMap
+           (migration 0042). For the road ON the bridge the deck is closed and
+           the road beneath left open; for each road BENEATH, the ground under
+           the span is closed and the deck left open. Minimum distance only -
+           nothing on the way around is checked for clearance or posting.
+
+   Keyed by structure, not by route and milepoint: a detour is a property of
+   the crossing. A structure the statewide run did not reach says so; it is
+   never shown as a zero.
+   ========================================================================== */
+const DETOUR=new Map();           /* brdg_nbr -> {bypass, under:[...], vintage} */
+let DETOURASKED=new Set();        /* structures looked up, so "not measured" is distinguishable */
+const DETOUR_FAR_MI=5;            /* a coded value this far off, and off by half, is a note */
+const DETOUR_SITE_MI=2;           /* "bypass at the site" with more than this measured */
+const bnKey=b=>String(b&&b.BRDG_NBR!=null?b.BRDG_NBR:'').trim();
+
+/* B.H.17 decoded. The number and what NCDOT means by it travel together. */
+function bh17(b){
+  const raw=b?b.DETOUR_LEN:null;
+  if(raw==null||String(raw).trim()==='') return {code:null,kind:'blank',label:'not coded'};
+  const c=Number(raw);
+  if(!isFinite(c)) return {code:null,kind:'blank',label:'not a number ('+raw+')'};
+  if(c===0)  return {code:0, kind:'site', label:'0 — a bypass at the site'};
+  if(c===99) return {code:99,kind:'none', label:'99 — NCDOT’s no-detour code'};
+  if(c>98)   return {code:c, kind:'special',label:c+' — a code whose meaning NCDOT does not publish'};
+  return {code:c,kind:'miles',label:c+' mi'};
+}
+
+/* One read per 200 structures, scoped to what is on screen. */
+async function loadDetour(bns,onProgress){
+  const want=[...new Set((bns||[]).map(x=>String(x==null?'':x).trim()).filter(x=>x&&!DETOURASKED.has(x)))];
+  if(!want.length) return 0;
+  let got=0;
+  const num=x=>x==null||x===''?null:Number(x);
+  for(let i=0;i<want.length;i+=200){
+    const chunk=want.slice(i,i+200);
+    const rows=await sbAll('detour_measured?select=brdg_nbr,mode,seq,road,heading,verdict,around_mi,'+
+      'direct_mi,additional_mi,probe_mi,reason,width_assumed,deck_inferred,graph_vintage'+
+      '&brdg_nbr=in.'+sbIn(chunk));
+    rows.forEach(r=>{
+      const k=String(r.brdg_nbr).trim();
+      let d=DETOUR.get(k);
+      if(!d){ d={bypass:null,under:[],vintage:r.graph_vintage||''}; DETOUR.set(k,d); }
+      const row=Object.assign({},r,{around_mi:num(r.around_mi),direct_mi:num(r.direct_mi),
+        additional_mi:num(r.additional_mi),probe_mi:num(r.probe_mi)});
+      if(r.mode==='bypass') d.bypass=row; else d.under.push(row);
+      got++;
+    });
+    DETOUR.forEach(d=>d.under.sort((a,b)=>(a.seq||0)-(b.seq||0)));
+    chunk.forEach(x=>DETOURASKED.add(x));
+    if(onProgress) onProgress(Math.min(i+200,want.length),want.length);
+  }
+  return got;
+}
+
+/* undefined = not looked up; null = looked up and not in the run; else the record */
+function detourOf(b){
+  const k=bnKey(b);
+  if(!DETOURASKED.has(k)) return undefined;
+  return DETOUR.get(k)||null;
+}
+
+/* The findings. Each is a disagreement between the code and the road network
+   where the network's answer is unambiguous; plain mismatches are a note. */
+function detourFlags(b){
+  const d=detourOf(b), c=bh17(b), out=[];
+  if(!d||!d.bypass||c.code==null) return out;
+  const v=d.bypass.verdict, a=d.bypass.additional_mi;
+  if((c.kind==='miles'||c.kind==='site')&&v==='no_detour') out.push('DETOUR_CODED_DEAD_END');
+  if(c.kind==='none'&&(v==='ok'||v==='bypass_at_site')) out.push('DETOUR_99_MEASURED');
+  if(c.kind==='site'&&v==='ok'&&a!=null&&a>DETOUR_SITE_MI) out.push('DETOUR_0_LONG');
+  if(c.kind==='miles'&&v==='ok'&&a!=null&&Math.abs(a-c.code)>DETOUR_FAR_MI&&(a>1.5*c.code||a<0.5*c.code))
+    out.push('DETOUR_FAR_OFF');
+  return out;
+}
+
+/* The scope pass: one read per 200 structures, then re-validate so the
+   findings land in the checklist and the counts. Quiet inside Run all. */
+async function detourCheck(scope,quiet){
+  const list=scope||ALL;
+  if(!list.length) return;
+  try{
+    await loadDetour(list.map(b=>b.BRDG_NBR),quiet?null:
+      (d,n)=>busy(true,'Detour length',d.toLocaleString()+' / '+n.toLocaleString()+' structures',d/n*100));
+  }catch(e){ if(!quiet){ busy(false); toast('Detour lengths could not be read: '+(e.message||e),7000); } return; }
+  revalidate(); applyFilters(); if(!quiet) busy(false);
+  if(quiet) return;
+  const m=list.filter(b=>{const d=detourOf(b); return d&&d.bypass;});
+  const dead=m.filter(b=>detourOf(b).bypass.verdict==='no_detour').length;
+  toast('Detour length: '+m.length.toLocaleString()+' of '+list.length.toLocaleString()+
+    ' structures measured, '+dead.toLocaleString()+' with no way around.',9000);
+}
+
+/* One measured value, with what it is and how it was got. */
+function detourVal(r){
+  const sub=s=>'<div style="color:#5A5A5A;font-size:11.5px">'+s+'</div>';
+  const how=(r.deck_inferred?' &middot; deck inferred: the map has the road but does not mark the bridge':'')+
+            (r.width_assumed?' &middot; deck width assumed (30 ft)':'');
+  if(r.verdict==='ok')
+    return '<span class="mono" style="font-size:14px">'+r.additional_mi.toFixed(1)+' mi</span> extra'+
+      sub(r.around_mi.toFixed(1)+' mi around, against '+r.direct_mi.toFixed(2)+' mi straight across'+how);
+  if(r.verdict==='bypass_at_site')
+    return '<span class="mono">'+(r.additional_mi||0).toFixed(2)+' mi</span> extra &mdash; a way past at the site'+sub(how.replace(/^ &middot; /,''));
+  if(r.verdict==='no_detour')
+    return '<span style="color:#CF3910;font-weight:600">No detour</span>'+sub(esc(r.reason||''));
+  return '<span style="color:#C9A227">Not measured</span>'+sub(esc(r.reason||''));
+}
+
+/* The panel section: B.H.17 first, because it is the reported item, then the
+   measurements it can be checked against. */
+function detourPanel(b){
+  const c=bh17(b), d=detourOf(b);
+  let h='<div class="dr-sec">Detour length &mdash; B.H.17</div>'+
+    '<dl class="kv" style="grid-template-columns:118px 1fr">'+
+    '<dt>NCDOT coded</dt><dd class="mono">'+
+      (c.code==null?'<span style="color:#5A5A5A">'+esc(c.label)+'</span>':esc(c.label))+
+      '<div style="color:#5A5A5A;font-size:11.5px;font-family:var(--font-b,inherit)">B.H.17 as published, in miles</div></dd>';
+  if(d===undefined)
+    return h+'<dt>Measured</dt><dd style="color:#5A5A5A;font-size:12px">not looked up yet</dd></dl>';
+  if(d===null||!d.bypass)
+    return h+'<dt>Measured</dt><dd style="color:#5A5A5A;font-size:12px">not measured &mdash; this structure '+
+      'was not in the statewide run</dd></dl>';
+  h+='<dt>Road on the bridge</dt><dd>'+detourVal(d.bypass)+'</dd>';
+  const under=d.under.filter(r=>r.verdict!=='none_beneath');
+  if(under.length) under.forEach(r=>{
+    h+='<dt>Road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r)+'</dd>'; });
+  else{ const nb=d.under.find(r=>r.verdict==='none_beneath');
+    h+='<dt>Road beneath</dt><dd style="color:#5A5A5A;font-size:12px">'+esc(nb?nb.reason:'no road-beneath measurement recorded')+'</dd>'; }
+  return h+'</dl><div style="font-size:11.5px;color:#5A5A5A;margin:-2px 0 8px">Measured on the road network ('+
+    esc(d.vintage)+'). The road on the bridge with its deck closed and the road beneath open; each road '+
+    'beneath with the ground under the span closed and the deck open. Minimum distance only &mdash; nothing '+
+    'on the way around is checked for clearance, posting or width.</div>';
+}
+
+/* The pin, in the popup's own idiom: the detour that matters for the road the
+   pin landed on - the bridge's own if it is carried, the road-beneath one if
+   it passes under. */
+function detourPop(b,hit){
+  if(!b) return '';
+  const d=detourOf(b), c=bh17(b);
+  if(!d||!d.bypass) return '';
+  const short=r=>r.verdict==='ok'?r.additional_mi.toFixed(1)+' mi extra'
+    :r.verdict==='bypass_at_site'?'a way past at the site'
+    :r.verdict==='no_detour'?'<b style="color:#CF3910">no detour</b>':'not measured';
+  let h='<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px">Detour length</div>';
+  if(!hit||hit.loc==='C')
+    h+='<div class="pop-k">If bridge <b>'+esc(b.BRDG_NBR)+'</b> closes: '+short(d.bypass)+
+       ' &middot; NCDOT codes '+esc(c.label)+' (B.H.17)</div>';
+  else{
+    const u=d.under.filter(r=>r.verdict!=='none_beneath');
+    h+=u.length? u.map(r=>'<div class="pop-k">If the road under <b>'+esc(b.BRDG_NBR)+'</b> closes'+
+        (r.road?' ('+esc(r.road)+')':'')+': '+short(r)+'</div>').join('')
+      : '<div class="pop-k">No road-beneath detour measured for '+esc(b.BRDG_NBR)+'</div>';
+  }
+  return h;
+}
+
 function validateFeature(b,f){
   if(isRowFeature(f)){
     /* Structure-level findings stay on the structure. Repeating them inside the
@@ -3068,6 +3252,10 @@ async function deriveFeatures(scope){
 let FEATBUSY=null;
 async function featuresOnOpen(bn){
   const b=ALL.find(x=>x.BRDG_NBR===bn);
+  /* The detour comes with the bridge whether or not its features are done. */
+  if(b&&!DETOURASKED.has(bnKey(b)))
+    loadDetour([b.BRDG_NBR]).then(()=>{ revalidate(); if(SEL===bn) drawDetail(b); renderTable(); })
+      .catch(()=>{ /* additive: the bridge still reviews without it */ });
   if(!b||b._featDone||b._featBusy||!b.LAT_DD) return;
   if(!b._twins) twinScan();
   b._featBusy=true;
@@ -3346,6 +3534,7 @@ const COLS=[
  {k:'FTR_INTRSC',t:'Crossed'},
  {k:'_aadt',t:'BH09 AADT',mono:1,num:1},{k:'_aadtt',t:'BH10 trucks',mono:1,num:1},
  {k:'_aadty',t:'BH11 year',mono:1,num:1},
+ {k:'_bh17',t:'BH17 coded',mono:1,num:1},{k:'_detour',t:'Detour measured',mono:1,num:1},
  {k:'_rev',t:'Review'},{k:'_stype',t:'Structure type'},{k:'_cond',t:'Cond D/Su/Sb'},
  {k:'_fix',t:'Suggested BH06 / BH07',mono:1},{k:'_flaglab',t:'Findings'}];
 
@@ -3391,6 +3580,15 @@ function cell(b,k){
   if(k==='_aadty'){ const t=rowTraffic(b); if(!t||t.year==null) return '';
     const old=(new Date().getFullYear()-t.year)>STALE_YEARS;
     return '<span'+(old?' style="color:#C9A227"':'')+'>'+t.year+'</span>'; }
+  if(k==='_bh17'){ const c=bh17(b); if(c.code==null) return '';
+    return c.kind==='miles'?String(c.code):'<span title="'+esc(c.label)+'">'+c.code+
+      ' <span style="color:#5A5A5A">'+({site:'site',none:'none',special:'?'}[c.kind]||'')+'</span></span>'; }
+  if(k==='_detour'){ const d=detourOf(b); if(!d||!d.bypass) return '';
+    const r=d.bypass, odd=b._flags.some(f=>f.indexOf('DETOUR_')===0&&RULEMAP[f]&&RULEMAP[f].sev==='w');
+    const txt=r.verdict==='ok'?r.additional_mi.toFixed(1):r.verdict==='bypass_at_site'?'0.0 site':
+              r.verdict==='no_detour'?'none':'\u2014';
+    return '<span'+(odd?' style="color:#C9A227"':'')+' title="'+esc(r.verdict==='unmeasured'?r.reason||'':
+      'extra miles with the deck closed')+'">'+txt+'</span>'; }
   if(k==='_cond'){ if(!b._snbi) return '';
     const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(x=>b._snbi[x]==null?'-':b._snbi[x]);
     const mn=Math.min(...v.map(x=>parseInt(x,10)).filter(x=>!isNaN(x)));
@@ -3440,6 +3638,8 @@ function sortView(){
       return v.length?Math.min(...v):99;}; x=f(a); y=f(b);}
     else if(sortKey==='_bh06'){x=(a._rid||'')||(a._derived&&a._derived.rid)||'';
       y=(b._rid||'')||(b._derived&&b._derived.rid)||'';}
+    else if(NUMCOL[sortKey]){x=numOf(a,sortKey);y=numOf(b,sortKey);
+      if(x==null)x=-1e9; if(y==null)y=-1e9;}
     else {x=a[sortKey];y=b[sortKey];}
     if(x==null)x=''; if(y==null)y='';
     if(typeof x==='number'&&typeof y==='number') return (x-y)*sortDir;
@@ -3456,7 +3656,7 @@ function sortView(){
    Numeric columns take a comparison as well as a number: >100, <=0.5, 2-8. A
    milepoint filter that could only match exactly would be no use at all. */
 const COLF={};                       /* column key -> what the reviewer typed */
-const NUMCOL={MP:1,_off:1,_aadt:1,_aadtt:1,_aadty:1};
+const NUMCOL={MP:1,_off:1,_aadt:1,_aadtt:1,_aadty:1,_bh17:1,_detour:1};
 
 function cellText(b,k){
   return String(cell(b,k)||'').replace(/<[^>]*>/g,' ')
@@ -3488,6 +3688,9 @@ function numOf(b,k){
     const t=rowTraffic(b); if(!t) return null;
     return k==='_aadt'?t.aadt : k==='_aadtt'?t.aadtt : t.year;
   }
+  if(k==='_bh17') return bh17(b).code;
+  if(k==='_detour'){ const d=detourOf(b); const r=d&&d.bypass;
+    return r&&(r.verdict==='ok'||r.verdict==='bypass_at_site')?r.additional_mi:null; }
   return null;
 }
 
@@ -3819,6 +4022,7 @@ function drawDetail(b){
        :'')+'</div>';
 
   h+=featurePanel(b);
+  h+=detourPanel(b);
 
   const ff=b._flags.filter(f=>RULEMAP[f].grp==='fhwa'), qf=b._flags.filter(f=>RULEMAP[f].grp==='qc'),
         nf=b._flags.filter(f=>RULEMAP[f].grp==='note');
@@ -4169,6 +4373,7 @@ async function pinAt(lat,lon){
       (at.StreetName?'<div class="pop-k" style="margin-top:7px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
       (conc.length?'<div class="pop-k" style="margin-top:7px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
       trafficPop(ptr)+
+      detourPop(sel,hit)+
       '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px;line-height:1.45">'+
       (sel
         ? (hit
@@ -4276,7 +4481,9 @@ function exportCSV(){
     'VALIDATED_BH06','VALIDATED_BH07','VALUE_SOURCE','ROUTE_DECODED',
     'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT',
     'BH09_AADT','BH10_AADTT','BH11_AADT_YEAR','AADT_BASIS','AADT_STATION','AADT_TRUCK_SHARE','AADT_SHARE_YEAR',
-    'AADT_PROBE_LO95','AADT_PROBE_HI95','NCDOT_RECORD_AADT','F_CARRIED','FTR_INTRSC','MAINT_RESP',
+    'AADT_PROBE_LO95','AADT_PROBE_HI95','NCDOT_RECORD_AADT',
+    'BH17_NCDOT_CODE','BH17_MEANING','DETOUR_MEASURED','DETOUR_AROUND_MI','DETOUR_ADDITIONAL_MI','DETOUR_NOTE',
+    'DETOUR_BENEATH','DETOUR_GRAPH','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
@@ -4305,6 +4512,19 @@ function exportCSV(){
       (t=>t&&t.lo!=null?t.lo:'')(rowTraffic(b)),
       (t=>t&&t.hi!=null?t.hi:'')(rowTraffic(b)),
       b.AADT==null?'':b.AADT,
+      /* B.H.17 and the measurement beside it. A verdict travels with every
+         number, so a blank can never be read as a zero-mile detour. */
+      (c=>c.code==null?'':c.code)(bh17(b)), bh17(b).label,
+      (d=>d===undefined?'NOT LOOKED UP':!d||!d.bypass?'NOT MEASURED':
+        ({ok:'MEASURED',bypass_at_site:'BYPASS AT SITE',no_detour:'NO DETOUR',unmeasured:'UNMEASURED'}[d.bypass.verdict]||d.bypass.verdict))(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.around_mi!=null?d.bypass.around_mi.toFixed(3):'')(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.additional_mi!=null?d.bypass.additional_mi.toFixed(3):'')(detourOf(b)),
+      (d=>!d||!d.bypass?'':[d.bypass.reason, d.bypass.deck_inferred?'deck inferred':'',
+        d.bypass.width_assumed?'deck width assumed':''].filter(Boolean).join('; '))(detourOf(b)),
+      (d=>!d?'':d.under.map(r=>r.verdict==='none_beneath'?'none':(r.road||'road')+': '+
+        (r.verdict==='ok'?'+'+r.additional_mi.toFixed(2)+' mi':r.verdict==='bypass_at_site'?'bypass at site':
+         r.verdict==='no_detour'?'no detour':'unmeasured')).join('; '))(detourOf(b)),
+      (d=>d?d.vintage:'')(detourOf(b)),
       b.F_CARRIED,b.FTR_INTRSC,b.MAINT_RESP,b.FUNC_CLASS,b.LAT_DD,b.LONG_DD,
       (REVIEW.get(b.BRDG_NBR)||{}).status||'', (REVIEW.get(b.BRDG_NBR)||{}).note||'',
       (REVIEW.get(b.BRDG_NBR)||{}).by||'',

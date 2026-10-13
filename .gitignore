@@ -1,5 +1,9 @@
-node_modules/
+node_modules
 /fx/
 *.zip
 __pycache__/
 .DS_Store
+# build intermediates - build.py writes here; the shipped copies live in dist/ and docs/
+src/NCDOT_BH06_BH07_Validator.html
+src/NCDOT_BH06_BH07_Validator_artifact.html
+src/web/

@@ -212,11 +212,12 @@ map is available wherever the tool works at all. Each source is also selectable 
 ## Building
 
 ```bash
-npm install leaflet@1.9.4 @fontsource/oswald @fontsource/open-sans
-python3 src/build.py
+npm install        # exact versions, pinned in package.json
+npm run build      # builds, then copies into dist/ and docs/
 ```
 
-Produces the three builds. `src/tool_template.html` is the only file to edit — everything else
+Produces the three builds. The pinned versions reproduce the shipped files byte
+for byte, which is the check to run after any toolchain change. `src/tool_template.html` is the only file to edit — everything else
 is generated.
 
 ## Data sources

@@ -1,7 +1,7 @@
 # As-measured detour length
 
-**Status, 13 October 2026: measured statewide.** All 14,262 NCDOT bridge
-structures, both modes, on a self-hosted North Carolina graph built from the
+**Status, 13 October 2026: measured statewide and live in the tool.** All
+19,676 NCDOT bridges, culverts and pipes, both modes, on a self-hosted North Carolina graph built from the
 OpenStreetMap extract of 12 October. Results and the findings they produced are
 in *Statewide run* at the end. Everything above that section is the design work
 that got there, kept because the reasons matter.
@@ -297,3 +297,44 @@ means precisely; and whether B.H.17 will be submitted from this field.
 - **Migration 0042.** Written and committed. It had not yet reached the database
   as of this writing, because `apply_migration` timed out four times without
   executing.
+
+## Culverts and pipes, and the tool — later the same day
+
+**Culverts and pipes added.** The first run covered NCDOT's bridge layer only:
+14,262 structures out of the 23,022 the tool lists. A live end-to-end test in
+Burke County caught the gap. Every bridge was measured, but 55 culverts and pipes
+showed "not measured". The 5,414 culverts and pipes statewide were then run
+through the same pipeline on the same graph: 99.3-99.5% answered, and 5,019 of
+the decks were inferred, since culverts are rarely tagged in the map. From code
+10 upward the median measured-to-coded ratio is 1.00 across 229 of them, so the
+inference holds. Railroad bridges, walkways and signs carry no road and are
+deliberately left out.
+
+**Combined, 19,676 structures:** 17,320 measured, 1,383 no detour, 752 bypass at
+the site, 221 unmeasured (1.1%). With culverts included the units fit is 89% as
+miles across 15,385 structures, against 95% for bridges alone, because culverts
+are mostly short detours where miles and kilometres sit close together. From code
+10 up the median ratio is unchanged at 1.03. Code 1: 7,132 structures, 36%,
+median 2.3x. Code 99: 1,005 of 1,579 (64%) measured as dead ends.
+
+**In the tool.** B.H.17 (`DETOUR_LEN`) is read from the bridge layer and shown
+beside the measurement:
+
+- in a Detour length section of the bridge panel
+- in two numeric table columns
+- in eight CSV columns
+- in the pin popup, which gives the bridge's own detour on its carried road
+  and the road-beneath detour on a road under it
+
+Four findings are weighted so detour never outshouts BH06/BH07. Three warnings
+where the network contradicts the code:
+
+- a detour coded where the bridge is the only way across (377)
+- a 99 with a way around (551)
+- a 0 with more than 2 miles to go (346)
+
+And one note for a gap of more than half and more than 5 miles (1,986).
+
+A new test suite, `detour.test.js`, has 61 assertions, and the full regression is
+470 assertions on each of three builds, all passing. The built tool was also
+run live against NCDOT and the database.

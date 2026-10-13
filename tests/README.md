@@ -1,11 +1,11 @@
 # Tests
 
-Nine Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
+Ten Playwright suites. Every endpoint is mocked — NCDOT, FHWA, Supabase, the auth
 service and all six tile hosts — so none of them needs network access, and none of
 them can pass because a live service happened to answer.
 
 ```bash
-npm install playwright leaflet @supabase/supabase-js
+npm install          # exact versions, from package.json
 node tests/data.test.js        dist/NCDOT_BH06_BH07_Validator.html
 node tests/basemap.test.js     dist/NCDOT_BH06_BH07_Validator.html
 node tests/corrections.test.js dist/NCDOT_BH06_BH07_Validator.html
@@ -15,6 +15,7 @@ node tests/columns.test.js     dist/NCDOT_BH06_BH07_Validator.html
 node tests/field.test.js       dist/NCDOT_BH06_BH07_Validator.html
 node tests/approvals.test.js   dist/NCDOT_BH06_BH07_Validator.html
 node tests/traffic.test.js     dist/NCDOT_BH06_BH07_Validator.html
+node tests/detour.test.js      dist/NCDOT_BH06_BH07_Validator.html
 ```
 
 Each takes a build as its argument and should pass on all three: `dist/`, the
@@ -176,14 +177,34 @@ feature are the same question about the same stretch of road, so they get the
 same answer. The confirmation card shows that traffic before the yes, and
 accepting carries it onto the feature.
 
-`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all nine. It
+`detour.test.js` covers B.H.17. The claim under test is not "a detour appears".
+It is that NCDOT's coded value and the measured detour are shown as **two
+things**, allowed to disagree in plain view, and that a structure the statewide
+run did not reach, or could not measure, says so and is never shown as a zero-mile
+detour. A dead end is "No detour" in the panel, "none" in the table and
+`NO DETOUR` with blank distances in the CSV. B.H.17's special codes are decoded
+rather than read as distances: 0 is a bypass at the site, 99 is NCDOT's no-detour
+code, and 199 is reported as a code, not as 199 miles.
+
+The findings are pinned to fire exactly where the road network contradicts the
+code and nowhere else: a detour coded on a structure that is the only way across,
+a 99 with a way around, and a 0 with miles to go are warnings. A plain mismatch is
+only a note, and only when it is both more than half and more than 5 miles off,
+because from code 10 upward the two agree to a median within 3% statewide. It
+asserts the reads are scoped by structure number and made once, that the CSV stays
+aligned, and that the pin reports the detour for the road it lands on: the
+bridge's own on the carried road, the road-beneath detour on a road under it. Its
+last section fails the read and asserts the tool says "not looked up" rather than
+drawing an empty state, and raises no finding on missing data.
+
+`fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all ten. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **60** traffic — 409 in all.
+**49** approvals, **60** traffic, **61** detour — 470 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

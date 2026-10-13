@@ -10,7 +10,12 @@ SB_URL = os.environ.get('SB_URL','https://drstmntdbmacdplhjvmx.supabase.co')
 SB_KEY = os.environ.get('SB_KEY','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRyc3RtbnRkYm1hY2RwbGhqdm14Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY2MzMwMDEsImV4cCI6MjEwMjIwOTAwMX0.319PV9Prn8q6qurIMG_SHk63EoRQCv6tkGn_0fiwo7A')
 h = h.replace('__SB_URL__',SB_URL).replace('__SB_KEY__',SB_KEY)
 def b64(p): return base64.b64encode(open(p,'rb').read()).decode()
-LOGO=b64('/root/.claude/skills/synced/strinteg-design/assets/logo.png')
+import glob
+# The skills folder is re-synced under a generated id, so find the logo rather than hard-code it.
+LOGO_PATH=os.environ.get('LOGO_PATH') or next(iter(sorted(glob.glob(
+    '/root/.claude/skills/synced/**/strinteg-design/assets/logo.png', recursive=True))), None)
+if not LOGO_PATH: raise SystemExit('logo.png not found - set LOGO_PATH')
+LOGO=b64(LOGO_PATH)
 
 # ---------------- variant A: fully self-contained (NCDOT / offline) -------------
 FONTS=[('Oswald',400,'node_modules/@fontsource/oswald/files/oswald-latin-400-normal.woff2'),

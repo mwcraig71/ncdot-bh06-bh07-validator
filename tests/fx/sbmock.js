@@ -129,10 +129,14 @@ module.exports = function sbmock(page, opts = {}) {
   const traffic_client = opts.traffic || [];
   const traffic_probe  = opts.probe   || [];
 
+  /* Detour length as measured (migration 0042): one row per structure per
+     mode, keyed by brdg_nbr, read for the structures on screen. */
+  const detour_measured = opts.detour || [];
+
   const TABLES = { county_geojson, structure_snbi: snbi, route_extents: extents,
                    hpms_routes: hpms, data_vintage: vintage,
                    proposal_queue, approver_directory,
-                   traffic_client, traffic_probe };
+                   traffic_client, traffic_probe, detour_measured };
 
   return page.route(SB + '/rest/v1/**', async route => {
     const req = route.request();
@@ -180,7 +184,7 @@ module.exports = function sbmock(page, opts = {}) {
     if (opts.fail && opts.fail === table) return J({ message: 'boom' }, 500);
     return J(rows.slice(offset, offset + limit));
   }).then(() => ({ log, SB, county_geojson, snbi, extents, hpms, vintage,
-                   proposal_queue, approver_directory, traffic_client, traffic_probe,
+                   proposal_queue, approver_directory, traffic_client, traffic_probe, detour_measured,
                    /* helpers the suites read */
                    reads: t => log.filter(x => x.table === t),
                    rpcs: () => log.filter(x => x.rpc),
