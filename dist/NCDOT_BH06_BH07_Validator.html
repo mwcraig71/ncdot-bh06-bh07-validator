@@ -792,6 +792,11 @@ main{flex:1;display:flex;min-height:0}
 .tbar{display:flex;align-items:center;gap:10px;padding:7px 14px;border-bottom:1px solid var(--line);background:var(--bg-gray)}
 .tbar .ttl{font-family:var(--font-h);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--black)}
 .tbar .sp{flex:1}
+.tgrp{display:flex;gap:4px;flex-wrap:wrap}
+.tgrp button{font:600 11px/1 var(--font-b,inherit);padding:5px 9px;border:1px solid var(--line);border-radius:12px;
+  background:#fff;color:#5A5A5A;cursor:pointer;white-space:nowrap}
+.tgrp button.on{background:#1A1A1A;color:#fff;border-color:#1A1A1A}
+.tgrp button .c{font-weight:400;margin-left:5px;opacity:.75}
 .tscroll{flex:1;overflow:auto}
 #tscroll table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
 #tscroll thead th{position:sticky;top:0;background:#fff;border-bottom:2px solid var(--black);text-align:left;
@@ -1260,6 +1265,7 @@ body.field #apprbtn{display:none}
       <div class="tbar">
         <span class="ttl" id="ttl">Results</span>
         <span class="n" id="tcount" style="font-size:11.5px;color:var(--gray-2)"></span>
+        <div class="tgrp" id="tgrp" role="group" aria-label="Show structure type"></div>
         <span class="sp"></span>
         <span style="font-size:11px;color:var(--gray-3)">click a row to inspect &middot; click a header to sort &middot;
           <span style="color:#2E7D32">&#9670; derived</span> values are proposals, not NCDOT's published data</span>
@@ -1435,7 +1441,27 @@ const BRIDGES=SVC+'/NCDOT_Bridges/MapServer/0';
 const ROADCHAR=SVC+'/NCDOT_RoadCharacteristicsQtr/MapServer/0';
 const COUNTYBDY=SVC+'/NCDOT_CountyBdy_Poly/MapServer/0';
 const STRUCT=SVC+'/NCDOT_Structures/NCDOT_DynamicStructures/MapServer';
-const GPTOOL=SVC+'/NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool';
+/* NCDOT renamed this service in October 2026 (NCDOTIdentifyRoute... became
+   IdentifyRoute...), and the pin failed with a 404 until the address was
+   changed. gpTool() therefore checks the address once per session and, if it
+   has gone, finds the service again by name in the NCDOT_Tools folder, so the
+   next rename costs nothing. */
+let GPTOOL=SVC+'/NCDOT_Tools/IdentifyRouteMilepostUsingPointTool/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool';
+let GPTOOL_OK=false;
+async function gpTool(){
+  if(GPTOOL_OK) return GPTOOL;
+  try{ const j=await (await fetch(GPTOOL+'?f=json')).json();
+       if(!j.error){ GPTOOL_OK=true; return GPTOOL; } }catch(e){}
+  const f=await (await fetch(SVC+'/NCDOT_Tools?f=json')).json();
+  const svc=(f.services||[]).find(x=>x.type==='GPServer'&&/IdentifyRouteMilepost/i.test(x.name));
+  if(!svc) throw new Error('NCDOT\u2019s route/milepost tool is not in its usual folder any more');
+  const base=SVC+'/'+svc.name+'/GPServer';
+  const t=await (await fetch(base+'?f=json')).json();
+  const task=(t.tasks||[]).find(x=>/milepost/i.test(x))||(t.tasks||[])[0];
+  if(!task) throw new Error('NCDOT\u2019s route/milepost service lists no task');
+  GPTOOL=base+'/'+encodeURIComponent(task); GPTOOL_OK=true;
+  return GPTOOL;
+}
 const BFIELDS='BRDG_NBR,COUNTY,DIVISION,ROUTE,RTE_ID,MP,F_CARRIED,FTR_INTRSC,SERVICEON,SERVICEUNDER,RD_ANGLE,MAINT_RESP,FUNC_CLASS,LAT_DD,LONG_DD,BRDG_TYP_NM,AADT,DETOUR_LEN';
 
 const CLASS={'1':{p:'I',n:'Interstate'},'2':{p:'US',n:'US Route'},'3':{p:'NC',n:'NC Route'},
@@ -3493,16 +3519,37 @@ async function detourCheck(scope,quiet){
     ' structures measured, '+dead.toLocaleString()+' with no way around.',9000);
 }
 
-/* One measured value, with what it is and how it was got. */
-function detourVal(r){
+/* One measured value, with what it is and how it was got.
+
+   The headline is the EXTRA distance the closure costs. It is measured between
+   two points on the road, one each side of the structure, as the route with
+   the structure open against the route with it closed. Those two points sit
+   just past the ends of the structure where that gives a sound measurement,
+   and further out where it cannot - on an interstate, out to where traffic can
+   leave. So the open route between them can be miles long, and it is NOT the
+   distance across the structure: that is the structure's own length (or, for a
+   road beneath, the deck's width), which is shown as such. An earlier version
+   labelled the open route "straight across", which read as a 4-mile bridge. */
+function detourVal(r,b,mode){
   const sub=s=>'<div style="color:#5A5A5A;font-size:11.5px">'+s+'</div>';
-  const how=(r.deck_inferred?' &middot; deck inferred: the map has the road but does not mark the bridge':'')+
-            (r.width_assumed?' &middot; deck width assumed (30 ft)':'');
+  const how=[r.deck_inferred?'deck inferred: the map has the road but does not mark the bridge':'',
+             r.width_assumed?'deck width assumed (30 ft)':''].filter(Boolean).join(' &middot; ');
+  const sn=b&&b._snbi, ft=v=>v==null||v===''||!isFinite(Number(v))||Number(v)<=0?null:Math.round(Number(v));
+  const span=mode==='collapse'
+    ? (ft(sn&&sn.bridge_deck_width)!=null?'The deck over it is '+ft(sn.bridge_deck_width)+' ft wide.':'')
+    : (ft(sn&&sn.structure_length)!=null?'The structure itself is '+ft(sn.structure_length)+' ft long.':'');
+  const between=r.probe_mi==null?'':
+    'Measured between two points '+(r.probe_mi<0.2?'just past each end of the structure':
+      r.probe_mi.toFixed(r.probe_mi<1?2:0)+' mi either side of it')+
+    (r.direct_mi!=null&&r.around_mi!=null
+      ? ': '+r.direct_mi.toFixed(2)+' mi between them with it open, '+r.around_mi.toFixed(2)+' mi with it closed.'
+      : '.');
   if(r.verdict==='ok')
-    return '<span class="mono" style="font-size:14px">'+r.additional_mi.toFixed(1)+' mi</span> extra'+
-      sub(r.around_mi.toFixed(1)+' mi around, against '+r.direct_mi.toFixed(2)+' mi straight across'+how);
+    return '<span class="mono" style="font-size:14px">'+r.additional_mi.toFixed(1)+' mi</span> extra with it closed'+
+      sub([span,between].filter(Boolean).join(' '))+(how?sub(how):'');
   if(r.verdict==='bypass_at_site')
-    return '<span class="mono">'+(r.additional_mi||0).toFixed(2)+' mi</span> extra &mdash; a way past at the site'+sub(how.replace(/^ &middot; /,''));
+    return '<span class="mono">'+(r.additional_mi||0).toFixed(2)+' mi</span> extra &mdash; a way past at the site'+
+      (span?sub(span):'')+(how?sub(how):'');
   if(r.verdict==='no_detour')
     return '<span style="color:#CF3910;font-weight:600">No detour</span>'+sub(esc(r.reason||''));
   return '<span style="color:#C9A227">Not measured</span>'+sub(esc(r.reason||''));
@@ -3522,10 +3569,10 @@ function detourPanel(b){
   if(d===null||!d.bypass)
     return h+'<dt>Measured</dt><dd style="color:#5A5A5A;font-size:12px">not measured &mdash; this structure '+
       'was not in the statewide run</dd></dl>';
-  h+='<dt>Road on the bridge</dt><dd>'+detourVal(d.bypass)+'</dd>';
+  h+='<dt>Road on the bridge</dt><dd>'+detourVal(d.bypass,b,'bypass')+'</dd>';
   const under=d.under.filter(r=>r.verdict!=='none_beneath');
   if(under.length) under.forEach(r=>{
-    h+='<dt>Road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r)+'</dd>'; });
+    h+='<dt>Road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r,b,'collapse')+'</dd>'; });
   else{ const nb=d.under.find(r=>r.verdict==='none_beneath');
     h+='<dt>Road beneath</dt><dd style="color:#5A5A5A;font-size:12px">'+esc(nb?nb.reason:'no road-beneath measurement recorded')+'</dd>'; }
   return h+'</dl><div style="font-size:11.5px;color:#5A5A5A;margin:-2px 0 8px">Measured on the road network ('+
@@ -4162,6 +4209,7 @@ function applyFilters(){
     if(fk&&(b._rid||'')[0]!==fk) return false;
     if(fi&&(b._rid||'')[2]!==fi) return false;
     if(fm&&b.MAINT_RESP!==fm) return false;
+    if(TGRP&&stypeGroup(b)!==TGRP) return false;
     const fst=$('f-stype').value;
     if(fst&&(!b._snbi||b._snbi.structure_type!==fst)) return false;
     const fcd=$('f-cond').value;
@@ -4179,7 +4227,28 @@ function applyFilters(){
     }
     return true;
   });
-  sortView(); renderChecks(); renderSummary(); renderTable(); drawPoints();
+  sortView(); renderChecks(); renderSummary(); renderTable(); drawPoints(); renderTgrp();
+}
+
+/* Structure type, one tap away on the table itself. The Struct type list in
+   the filter panel splits BRIDGE from FEDERAL BRIDGE and is not there at all
+   on a phone, so "just the bridges" was hard to find. This reads the bridge
+   layer's own type, which every record carries, so it works before the SNBI
+   details have loaded. Of 23,022 structures, 2,871 are signs. */
+let TGRP='';
+const TGRPS=[['','All'],['bridge','Bridges'],['culvert','Culverts & pipes'],['other','Signs & other']];
+function stypeGroup(b){
+  const t=String(b.BRDG_TYP_NM||(b._snbi&&b._snbi.structure_type)||'').toUpperCase().trim();
+  if(t==='BRIDGE'||t==='FEDERAL BRIDGE') return 'bridge';
+  if(t==='CULVERT'||t==='PIPE') return 'culvert';
+  return 'other';
+}
+function renderTgrp(){
+  const el=$('tgrp'); if(!el) return;
+  if(!ALL.length||APPR.open){ el.innerHTML=''; return; }
+  const n={bridge:0,culvert:0,other:0}; ALL.forEach(b=>n[stypeGroup(b)]++);
+  el.innerHTML=TGRPS.map(([k,l])=>'<button type="button" data-g="'+k+'"'+(TGRP===k?' class="on"':'')+'>'+
+    l+'<span class="c">'+(k?n[k]:ALL.length).toLocaleString()+'</span></button>').join('');
 }
 
 function renderSummary(){
@@ -4970,29 +5039,75 @@ function toStatePlane(lat,lon){
   const K=1/0.3048006096012192;                  /* metres -> US survey feet */
   return {x:FE+r*Math.sin(theta)*K, y:FN+(rho0-r*Math.cos(theta))*K};
 }
-async function pinAt(lat,lon){
-  busy(true,'Identify route / milepoint','submitting point to NCDOT',10);
-  try{
-    const p=toStatePlane(lat,lon);
+/* The pin's answer without NCDOT's tool. On 13 October 2026 every job sent to
+   IdentifyRouteMilepostUsingPointTool failed on NCDOT's own server ("SDE
+   Connection file not found"), whatever was sent, so the pin failed for
+   everyone. The Road Characteristics layer carries the same LRS: each segment's
+   geometry holds the route milepoint as its M value (checked against BeginMp1
+   and EndMp1). So the nearest segment, and the M at the closest point on it, is
+   the same answer the tool gives: nearest route, its ID, its milepoint. */
+async function pinLocal(lat,lon){
+  const p=toStatePlane(lat,lon);
+  for(const ft of [150,600]){
+    const j=await esriQuery(ROADCHAR,{
+      geometry:lon+','+lat, geometryType:'esriGeometryPoint', inSR:'4326',
+      distance:String(ft), units:'esriSRUnit_Foot', spatialRel:'esriSpatialRelIntersects',
+      outFields:'RouteID,RouteID2,RouteID3,RouteID4,RouteID5,RouteID6,RouteName,StreetName',
+      returnGeometry:'true', returnM:'true', outSR:'2264', resultRecordCount:200});
+    let best=null;
+    (j.features||[]).forEach(f=>{
+      const a=f.attributes||{}; if(!a.RouteID) return;
+      const h=mAtPoint((f.geometry&&f.geometry.paths)||[],p.x,p.y);
+      if(h&&h.m!=null&&(!best||h.d<best.h.d)) best={a,h};
+    });
+    if(best) return {RID:best.a.RouteID, MEAS:Math.round(best.h.m*1e6)/1e6, Distance:best.h.d,
+      RouteName:best.a.RouteName, StreetName:best.a.StreetName,
+      Route2:best.a.RouteID2, Route3:best.a.RouteID3, Route4:best.a.RouteID4,
+      Route5:best.a.RouteID5, Route6:best.a.RouteID6, _local:true};
+  }
+  return null;
+}
+
+/* Once NCDOT's tool has failed, later pins in the session go straight to the
+   road layer rather than waiting on a job that will fail again. */
+let GP_DOWN=false;
+async function pinNCDOT(lat,lon){
+  const p=toStatePlane(lat,lon);
     const fs={geometryType:'esriGeometryPoint',spatialReference:{wkid:2264},
       fields:[{name:'Id',type:'esriFieldTypeInteger',alias:'Id'}],
       features:[{geometry:{x:p.x,y:p.y},attributes:{Id:0}}]};
-    const sub=await (await fetch(GPTOOL+'/submitJob',{method:'POST',
+    const GP=await gpTool();
+    const sub=await (await fetch(GP+'/submitJob',{method:'POST',
       body:new URLSearchParams({PointLocations:JSON.stringify(fs),f:'json'})})).json();
     if(!sub.jobId) throw new Error(sub.error?sub.error.message:'job not accepted');
     let st=sub;
     for(let i=0;i<60;i++){
       await new Promise(r=>setTimeout(r,1600));
       busy(true,'Identify route / milepoint','NCDOT is processing',Math.min(92,20+i*4));
-      st=await (await fetch(GPTOOL+'/jobs/'+sub.jobId+'?f=json')).json();
+      st=await (await fetch(GP+'/jobs/'+sub.jobId+'?f=json')).json();
       if(!['esriJobSubmitted','esriJobExecuting','esriJobWaiting','esriJobNew'].includes(st.jobStatus)) break;
     }
-    if(st.jobStatus!=='esriJobSucceeded') throw new Error('job '+st.jobStatus);
-    const res=await (await fetch(GPTOOL+'/jobs/'+sub.jobId+'/results/IdentifyRouteMPResults?f=json')).json();
+    if(st.jobStatus!=='esriJobSucceeded'){
+      const why=(st.messages||[]).filter(m=>/Error/.test(m.type)).map(m=>m.description)[0];
+      throw new Error('job '+st.jobStatus+(why?' ('+why+')':''));
+    }
+    const res=await (await fetch(GP+'/jobs/'+sub.jobId+'/results/IdentifyRouteMPResults?f=json')).json();
     const a=((res.value||{}).features||[])[0];
+    return a?a.attributes:null;
+}
+
+async function pinAt(lat,lon){
+  busy(true,'Identify route / milepoint','submitting point to NCDOT',10);
+  try{
+    let at=null, gpErr=null;
+    if(!GP_DOWN){ try{ at=await pinNCDOT(lat,lon); }catch(e){ gpErr=e; GP_DOWN=true; } }
+    if(!at){
+      busy(true,'Identify route / milepoint','reading NCDOT\u2019s road layer',60);
+      try{ at=await pinLocal(lat,lon); }catch(e){ if(gpErr) throw gpErr; throw e; }
+    }
     busy(false);
-    if(!a) { toast('No NCDOT route found at that point.',4000); return; }
-    const at=a.attributes, d=decodeRID(at.RID);
+    if(!at) { toast('No NCDOT route found at that point.',4000); return; }
+    const d=decodeRID(at.RID);
     const conc=[2,3,4,5,6].map(i=>at['Route'+i]).filter(Boolean);
     /* The pin already holds the only two things a traffic lookup needs — a route
        and a measure on it — so the same three items every feature carries are
@@ -5050,6 +5165,7 @@ async function pinAt(lat,lon){
     L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
       '<div class="pop-t">The road at this point</div>'+
       '<div class="pop-k">LRS route ID here</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
+      (at._local?'<div class="pop-k" style="margin-top:2px;text-transform:none;letter-spacing:0">Read from NCDOT\u2019s road layer: its route/milepost tool is not answering.</div>':'')+
       (d?'<div class="pop-k" style="margin-top:2px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
       '<div class="pop-k" style="margin-top:7px">Milepoint here, on that route</div><div class="pop-v" style="font-size:15px">'+
         (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
@@ -5091,7 +5207,7 @@ async function diagnostics(){
       const j=await esriQuery(COUNTYBDY,{where:'1=1',returnCountOnly:'true'});
       return (j.count||0)+' counties';}],
    ['Pin-drop tool','gis11 GPServer', async()=>{
-      const r=await fetch(GPTOOL+'?f=json'); const j=await r.json();
+      const u=await gpTool(); const r=await fetch(u+'?f=json'); const j=await r.json();
       return j.name?'available':'unexpected reply';}],
    ['Reference data','Supabase', async()=>{
       const r=await fetch(SB_URL+'/rest/v1/data_vintage?select=source_service,publication_label',
@@ -5165,8 +5281,8 @@ function exportCSV(){
     'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT',
     'BH09_AADT','BH10_AADTT','BH11_AADT_YEAR','AADT_BASIS','AADT_STATION','AADT_TRUCK_SHARE','AADT_SHARE_YEAR',
     'AADT_PROBE_LO95','AADT_PROBE_HI95','NCDOT_RECORD_AADT',
-    'BH17_NCDOT_CODE','BH17_MEANING','DETOUR_MEASURED','DETOUR_AROUND_MI','DETOUR_ADDITIONAL_MI','DETOUR_NOTE',
-    'DETOUR_BENEATH','DETOUR_GRAPH','F_CARRIED','FTR_INTRSC','MAINT_RESP',
+    'BH17_NCDOT_CODE','BH17_MEANING','DETOUR_MEASURED','DETOUR_EXTRA_MI','DETOUR_MEASURED_EACH_SIDE_MI',
+    'DETOUR_ROUTE_OPEN_MI','DETOUR_ROUTE_CLOSED_MI','DETOUR_NOTE','DETOUR_BENEATH','DETOUR_GRAPH','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
   const rows=[cols.join(',')];
@@ -5200,8 +5316,13 @@ function exportCSV(){
       (c=>c.code==null?'':c.code)(bh17(b)), bh17(b).label,
       (d=>d===undefined?'NOT LOOKED UP':!d||!d.bypass?'NOT MEASURED':
         ({ok:'MEASURED',bypass_at_site:'BYPASS AT SITE',no_detour:'NO DETOUR',unmeasured:'UNMEASURED'}[d.bypass.verdict]||d.bypass.verdict))(detourOf(b)),
-      (d=>d&&d.bypass&&d.bypass.around_mi!=null?d.bypass.around_mi.toFixed(3):'')(detourOf(b)),
+      /* The extra miles is the detour. The two route lengths are between the
+         measuring points, which can sit miles out on an interstate, so they are
+         named for what they are rather than "around" and "across". */
       (d=>d&&d.bypass&&d.bypass.additional_mi!=null?d.bypass.additional_mi.toFixed(3):'')(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.probe_mi!=null&&d.bypass.additional_mi!=null?d.bypass.probe_mi.toFixed(2):'')(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.direct_mi!=null?d.bypass.direct_mi.toFixed(3):'')(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.around_mi!=null?d.bypass.around_mi.toFixed(3):'')(detourOf(b)),
       (d=>!d||!d.bypass?'':[d.bypass.reason, d.bypass.deck_inferred?'deck inferred':'',
         d.bypass.width_assumed?'deck width assumed':''].filter(Boolean).join('; '))(detourOf(b)),
       (d=>!d?'':d.under.map(r=>r.verdict==='none_beneath'?'none':(r.road||'road')+': '+
@@ -5903,6 +6024,7 @@ function showApprovals(on){
   a.style.display=APPR.open?'':'none';
   if(ttl) ttl.textContent=APPR.open?'Approvals':'Results';
   if(cnt&&APPR.open) cnt.textContent='';
+  renderTgrp();
   const b=$('apprbtn'); if(b) b.classList.toggle('primary',APPR.open);
   if(APPR.open&&!APPR.loaded) loadQueue(); else renderApprovals();
 }
@@ -6218,6 +6340,7 @@ $('revfile').onchange=e=>{const f=e.target.files[0]; if(!f) return;
   const merge=$('revfile').dataset.merge==='1';
   const r=new FileReader(); r.onload=()=>openReview(String(r.result),merge); r.readAsText(f); e.target.value='';};
 $('f-rev').onchange=applyFilters;
+$('tgrp').onclick=e=>{ const b=e.target.closest('button'); if(!b) return; TGRP=b.dataset.g||''; applyFilters(); };
 $('hidecleared').onchange=applyFilters;
 window.addEventListener('beforeunload',e=>{ if(REVDIRTY){ e.preventDefault(); e.returnValue=''; } });
 $('snbibtn').onclick=()=>loadSNBI();
@@ -6231,7 +6354,7 @@ $('silentbtn').onclick=()=>{
   applyFilters();};
 $('clearf').onclick=()=>{Object.keys(COLF).forEach(k=>delete COLF[k]);
   ['f-q','f-county','f-div','f-class','f-inv','f-maint','f-mpmin','f-mpmax','f-triage']
-  .concat(['f-stype','f-cond']).forEach(i=>$(i).value=''); activeChecks.clear();
+  .concat(['f-stype','f-cond']).forEach(i=>$(i).value=''); activeChecks.clear(); TGRP='';
   silentOnly=false; $('silentbtn').classList.remove('on');
   $('silentbtn').textContent='Show what submits clean but is wrong'; applyFilters();};
 ['f-q','f-mpmin','f-mpmax'].forEach(i=>$(i).oninput=()=>{clearTimeout(window._d);window._d=setTimeout(applyFilters,280);});

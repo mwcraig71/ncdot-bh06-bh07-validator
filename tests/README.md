@@ -197,6 +197,15 @@ bridge's own on the carried road, the road-beneath detour on a road under it. It
 last section fails the read and asserts the tool says "not looked up" rather than
 drawing an empty state, and raises no finding on missing data.
 
+It also pins three fixes from the 13 October review. The panel never calls the
+route between the measuring points "straight across": on an interstate those
+points sit out at the interchanges, so that route can be miles long, and the panel
+names it for what it is. The pin finds NCDOT's route/milepost tool again if it is
+renamed, and when the tool fails on NCDOT's side it reads the route and milepoint
+off the Road Characteristics geometry instead, says so in the popup, and does not
+wait on the broken tool for the next pin. And the switch above the table shows
+bridges only, culverts and pipes only, or signs and other structures.
+
 `fx/sbmock.js` is the stand-in for the Supabase REST API, shared by all ten. It
 is a real little query engine — it honours `limit`, `offset`, `in.()` and `eq.` —
 because the things worth asserting are exactly whether the client scopes its reads
@@ -204,7 +213,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **60** traffic, **61** detour — 470 in all.
+**49** approvals, **60** traffic, **77** detour — 486 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

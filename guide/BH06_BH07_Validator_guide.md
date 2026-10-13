@@ -285,6 +285,11 @@ thousand routes and will ask you to confirm first.
 NCDOT already publishes but does not surface in its viewer. You get the route ID, the
 milepoint to three decimals, and any concurrent routes at that point.
 
+If NCDOT's tool is down, the pin still works. On 13 October 2026 every job sent to it failed
+on NCDOT's own server ("SDE Connection file not found"). When that happens the tool reads the
+nearest route and its milepoint straight off NCDOT's Road Characteristics layer, whose geometry
+carries the milepoints, and the popup says that's where the answer came from.
+
 **It also reports the traffic there.** BH09, BH10 and BH11 for the stretch of road under the
 point — the counting station and the year, or the probe estimate with its 95% interval, or a
 plain statement that nothing covers that point. They are the same three items every feature
@@ -478,6 +483,10 @@ rating, structure length, deck and roadway width, skew, lanes, main structure ty
 material, superstructure and substructure descriptions, service on/under, NHS, owner and
 maintenance responsibility. All of it lands in the bridge panel and the CSV, and two new
 filters appear — **structure type** and **worst condition rating**.
+
+Above the table, a switch shows **All**, **Bridges**, **Culverts & pipes** or **Signs & other**,
+each with its count. It reads NCDOT's structure type, so "Bridges" means bridges and federal
+bridges, and nothing else.
 
 ### It also tells you the population is not what it looks like
 
@@ -728,8 +737,15 @@ and never reads them as miles.
 
 ### What every answer can be
 
-- **A distance**: extra miles with the closure, with the path around and the way straight across
-  beside it.
+- **A distance**: the extra miles the closure costs. Under it, the structure's own length (or, for a
+  road beneath, the deck's width), and the two points the extra was measured between.
+
+  Those two points need explaining. On a local road they sit just past each end of the structure.
+  On an interstate they cannot, because there is nowhere to turn off at the end of the bridge, so
+  they move out until each one is somewhere traffic can leave and rejoin: often the next
+  interchange. The panel then reads, say, "measured between two points 2 mi either side of it:
+  4.04 mi between them with it open, 5.58 mi with it closed". The 4.04 mi is the road between the
+  two interchanges, not the width of the river. The detour is the difference, 1.54 mi.
 - **A way past at the site**: closing it costs next to nothing.
 - **No detour**: the far side is reachable only over this structure. This is an answer, not a
   failure, and it agrees with NCDOT's 99 on 64% of the structures coded 99.
@@ -760,7 +776,9 @@ A **Detour length** section in the bridge panel, after the features: the code fi
 on the bridge, then each road beneath by name. Two table columns, **BH17 coded** and **Detour
 measured**, both numeric for filtering and sorting: `>10` finds long detours, and `-` finds the
 ones with nothing measured. The CSV has `BH17_NCDOT_CODE`, `BH17_MEANING`, `DETOUR_MEASURED`,
-`DETOUR_AROUND_MI`, `DETOUR_ADDITIONAL_MI`, `DETOUR_NOTE`, `DETOUR_BENEATH` and `DETOUR_GRAPH`.
+`DETOUR_EXTRA_MI`, `DETOUR_MEASURED_EACH_SIDE_MI` (how far out the two measuring points sit),
+`DETOUR_ROUTE_OPEN_MI` and `DETOUR_ROUTE_CLOSED_MI` (the route between them each way),
+`DETOUR_NOTE`, `DETOUR_BENEATH` and `DETOUR_GRAPH`.
 A pin dropped on an open bridge's carried road shows that bridge's detour. Dropped on a road
 beneath it, the pin shows the detour for that road closing instead.
 
@@ -1039,7 +1057,8 @@ All public, no authentication.
 ```
 Bridges          gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_Bridges/MapServer/0
 Road geometry    .../NCDOT_RoadCharacteristicsQtr/MapServer/0
-Pin drop         .../NCDOT_Tools/NCDOTIdentifyRouteMilepostUsingPointTool/GPServer
+Pin drop         .../NCDOT_Tools/IdentifyRouteMilepostUsingPointTool/GPServer
+                 (found again by name if renamed; falls back to Road geometry if it fails)
 ```
 
 **Read from the database** — everything the bridges are tested against, loaded by a scheduled

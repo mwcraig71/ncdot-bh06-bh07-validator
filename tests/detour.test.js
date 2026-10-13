@@ -180,7 +180,17 @@ const fields=l=>{const out=[];let cur='',q=false;
   ok('a Detour length section, named for B.H.17',/Detour length.{0,4}B\.H\.17/i.test(t819),true);
   ok('NCDOT’s coded value, in miles',/NCDOT coded\s*2 mi/i.test(t819),true);
   ok('the road on the bridge: the extra miles with the deck closed',/Road on the bridge\s*1\.9 mi extra/i.test(t819),true);
-  ok('...with the path around and the way straight across beside it',/2\.0 mi around, against 0\.14 mi straight across/.test(t819),true);
+  ok('...and where it was measured between, with both route lengths',
+     /Measured between two points just past each end of the structure: 0\.14 mi between them with it open, 2\.00 mi with it closed/.test(t819),true);
+  ok('...never called "straight across": the anchor route is not the bridge',/straight across/i.test(t819),false);
+  ok('the bridge’s own length is the reference, in feet, where NCDOT gives one',
+     await p.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590819'); const L=b._snbi&&Number(b._snbi.structure_length);
+       return !(L>0) || document.getElementById('dr-body').innerText.includes('The structure itself is '+Math.round(L)+' ft long.');}),true);
+  const t819far=await p.evaluate(()=>{const d=DETOUR.get('590819'); const o=d.bypass;
+    d.bypass=Object.assign({},o,{probe_mi:2,direct_mi:4.04,around_mi:5.58,additional_mi:1.54});
+    select('590819',true); const t=document.getElementById('dr-body').innerText; d.bypass=o; return t;});
+  ok('an interstate measured from 2 mi out says so, rather than calling 4 mi the way across',
+     /1\.5 mi extra[\s\S]{0,200}Measured between two points 2 mi either side of it: 4\.04 mi between them with it open, 5\.58 mi with it closed/i.test(t819far),true);
   ok('each road beneath has its own line, by name',/I 485 Inner/.test(t819)&&/I 485 Outer/.test(t819),true);
   ok('...and a dead end beneath says so, with its reason',/No detour[\s\S]{0,40}no way around within 8 mi/.test(t819),true);
   ok('the graph it was measured on is named',t819.includes(V),true);
@@ -233,12 +243,14 @@ const fields=l=>{const out=[];let cur='',q=false;
   const row=bn=>rows.find(r=>r[0]===bn), at=(bn,c)=>row(bn)[cols.indexOf(c)];
   ok('B.H.17 as coded, with its meaning',at('590668','BH17_NCDOT_CODE')+' / '+at('590668','BH17_MEANING'),
      '0 / 0 — a bypass at the site');
-  ok('the measured verdict travels with the number',
-     at('590819','DETOUR_MEASURED')+' '+at('590819','DETOUR_ADDITIONAL_MI')+' '+at('590819','DETOUR_AROUND_MI'),
-     'MEASURED 1.860 2.000');
+  ok('the measured verdict travels with the number, and the route lengths with where they were measured',
+     ['DETOUR_MEASURED','DETOUR_EXTRA_MI','DETOUR_MEASURED_EACH_SIDE_MI','DETOUR_ROUTE_OPEN_MI','DETOUR_ROUTE_CLOSED_MI']
+       .map(c=>at('590819',c)).join(' '),'MEASURED 1.860 0.05 0.140 2.000');
+  ok('no column is named "around" or "across" any longer',
+     cols.some(c=>/AROUND|ACROSS|ADDITIONAL/.test(c)),false);
   ok('a dead end is NO DETOUR with blank distances, never 0',
-     at('590213','DETOUR_MEASURED')+'|'+at('590213','DETOUR_ADDITIONAL_MI')+'|'+at('590213','DETOUR_AROUND_MI'),
-     'NO DETOUR||');
+     ['DETOUR_MEASURED','DETOUR_EXTRA_MI','DETOUR_MEASURED_EACH_SIDE_MI','DETOUR_ROUTE_OPEN_MI','DETOUR_ROUTE_CLOSED_MI']
+       .map(c=>at('590213',c)).join('|'),'NO DETOUR||||');
   ok('...and its note says why, and that the deck was inferred',
      at('590213','DETOUR_NOTE'),'the far side is reachable only over this bridge (dead end); deck inferred');
   ok('a structure outside the run is NOT MEASURED',at('590669','DETOUR_MEASURED'),'NOT MEASURED');
@@ -264,6 +276,85 @@ const fields=l=>{const out=[];let cur='',q=false;
      await p.evaluate(()=>detourPop(null,null)),'');
   ok('a structure outside the run adds nothing to the popup',
      await p.evaluate(()=>detourPop(ALL.find(x=>x.BRDG_NBR==='590669'),{loc:'C'})),'');
+
+  console.log('\n7b. The pin finds NCDOT’s route/milepost tool after a rename');
+  const gp=await p.evaluate(async()=>{
+    const saveT=GPTOOL, saveOK=GPTOOL_OK, of=window.fetch, asked=[];
+    GPTOOL=SVC+'/NCDOT_Tools/OldName/GPServer/Old%20Task'; GPTOOL_OK=false;
+    window.fetch=async u=>{ asked.push(String(u)); const J=o=>new Response(JSON.stringify(o),{headers:{'content-type':'application/json'}});
+      if(/OldName/.test(u)) return J({error:{code:400,message:'Service not found'}});
+      if(/\/NCDOT_Tools\?f=json/.test(u)) return J({services:[{name:'NCDOT_Tools/Something',type:'MapServer'},
+        {name:'NCDOT_Tools/IdentifyRouteMilepostUsingPointTool_v2',type:'GPServer'}]});
+      if(/IdentifyRouteMilepostUsingPointTool_v2\/GPServer\?f=json/.test(u)) return J({tasks:['Identify Route Milepost Using Point Tool']});
+      return J({}); };
+    let url, url2, err=null;
+    try{ url=await gpTool(); url2=await gpTool(); }catch(e){ err=e.message; }
+    window.fetch=of; const n=asked.length; GPTOOL=saveT; GPTOOL_OK=saveOK;
+    return {url, url2, err, n};});
+  console.log('   '+JSON.stringify(gp));
+  ok('a renamed service is found in the NCDOT_Tools folder, not reported as a pin failure',
+     gp.url,'https://gis11.services.ncdot.gov/arcgis/rest/services/NCDOT_Tools/IdentifyRouteMilepostUsingPointTool_v2/GPServer/Identify%20Route%20Milepost%20Using%20Point%20Tool');
+  ok('...and remembered, so the next pin does not look again',gp.n===3&&gp.url2===gp.url,true);
+  const gpGone=await p.evaluate(async()=>{
+    const saveT=GPTOOL, saveOK=GPTOOL_OK, of=window.fetch;
+    GPTOOL=SVC+'/NCDOT_Tools/OldName/GPServer/Old%20Task'; GPTOOL_OK=false;
+    window.fetch=async u=>new Response(JSON.stringify(/OldName/.test(u)?{error:{code:400}}:{services:[]}));
+    let err=null; try{ await gpTool(); }catch(e){ err=e.message; }
+    window.fetch=of; GPTOOL=saveT; GPTOOL_OK=saveOK; return err;});
+  ok('if it has gone altogether, the message says so plainly',/not in its usual folder/.test(gpGone||''),true);
+
+  console.log('\n7b2. When NCDOT’s tool fails, the pin reads its road layer instead');
+  const fb=await p.evaluate(async()=>{
+    const of=window.fetch, asked=[]; GP_DOWN=false;
+    const lat=35.24, lon=-80.96, q=toStatePlane(lat,lon);
+    window.fetch=async(u,o)=>{ u=String(u); asked.push(u.replace(/\?.*/,''));
+      const J=x=>new Response(JSON.stringify(x),{headers:{'content-type':'application/json'}});
+      if(/submitJob/.test(u)) return J({jobId:'jx',jobStatus:'esriJobSubmitted'});
+      if(/\/jobs\/jx\?/.test(u)) return J({jobId:'jx',jobStatus:'esriJobFailed',
+        messages:[{type:'esriJobMessageTypeError',description:'SDE Connection file not found'}]});
+      if(/RoadCharacteristicsQtr\/MapServer\/0\/query/.test(u)) return J({features:[
+        {attributes:{RouteID:'10000085060',RouteName:'I-85',StreetName:'I-85 N'},
+         geometry:{paths:[[[q.x-1000,q.y+20,2.0],[q.x+1000,q.y+20,2.4]]]}},
+        {attributes:{RouteID:'40003135060',RouteName:'SR-3135',StreetName:'Elsewhere Rd'},
+         geometry:{paths:[[[q.x-1000,q.y+400,0.1],[q.x+1000,q.y+400,0.5]]]}}]});
+      return of(u,o); };
+    const ts=[]; const ot=window.toast; window.toast=(m,ms)=>{ts.push(m); return ot(m,ms);};
+    PINTARGET=null; await pinAt(lat,lon);
+    const pops=[...document.querySelectorAll('.leaflet-popup-content')], pop=pops.length?pops[pops.length-1].innerText:'';
+    const n1=asked.filter(x=>/submitJob/.test(x)).length;
+    await pinAt(lat,lon);
+    const n2=asked.filter(x=>/submitJob/.test(x)).length;
+    window.fetch=of; window.toast=ot; GP_DOWN=false;
+    return {pop:pop.replace(/\n+/g,' | '), toasts:ts, n1, n2};});
+  console.log('   '+fb.pop.slice(0,240));
+  ok('no "pin drop failed" when NCDOT’s tool fails',fb.toasts.some(t=>/failed/i.test(t)),false);
+  ok('the nearest route on the road layer, and the milepoint read off its geometry',
+     /LRS route ID here \| 10000085060/.test(fb.pop)&&/Milepoint here, on that route \| 2\.200/.test(fb.pop),true);
+  ok('...and the popup says where the answer came from',/Read from NCDOT’s road layer/.test(fb.pop),true);
+  ok('a second pin does not wait on the broken tool again',fb.n1===1&&fb.n2===1,true);
+
+  console.log('\n7c. The table can show bridges only');
+  const grp=await p.evaluate(()=>{
+    const cnt=g=>ALL.filter(b=>!g||stypeGroup(b)===g).length;
+    const btns=[...document.querySelectorAll('#tgrp button')].map(x=>x.innerText.replace(/\s+/g,' ').trim());
+    const all=VIEW.length;
+    document.querySelector('#tgrp button[data-g="bridge"]').click();
+    const onlyB=VIEW.every(b=>stypeGroup(b)==='bridge'), nB=VIEW.length,
+          on=document.querySelector('#tgrp button.on').dataset.g;
+    document.querySelector('#tgrp button[data-g="culvert"]').click();
+    const onlyC=VIEW.every(b=>stypeGroup(b)==='culvert'), nC=VIEW.length;
+    document.querySelector('#tgrp button[data-g=""]').click();
+    return {btns, all, nB, nC, onlyB, onlyC, on, back:VIEW.length, want:{b:cnt('bridge'),c:cnt('culvert')}};});
+  console.log('   '+JSON.stringify(grp));
+  ok('a switch above the table: All, Bridges, Culverts & pipes, Signs & other, each with its count',
+     grp.btns.length===4&&/^All/.test(grp.btns[0])&&/^Bridges/.test(grp.btns[1])&&/^Culverts & pipes/.test(grp.btns[2]),true);
+  ok('Bridges shows bridges and nothing else',grp.onlyB&&grp.nB===grp.want.b&&grp.on==='bridge',true);
+  ok('Culverts & pipes shows those and nothing else',grp.onlyC&&grp.nC===grp.want.c,true);
+  ok('All brings every structure back',grp.back,grp.all);
+  ok('the type is read from NCDOT’s structure type',
+     await p.evaluate(()=>[stypeGroup({BRDG_TYP_NM:'Bridge'}),stypeGroup({BRDG_TYP_NM:'FEDERAL BRIDGE'}),
+       stypeGroup({BRDG_TYP_NM:'Pipe'}),stypeGroup({BRDG_TYP_NM:'CULVERT'}),stypeGroup({BRDG_TYP_NM:'SIGN'})].join()),
+     'bridge,bridge,culvert,culvert,other');
 
   console.log('\n8. A failed read is reported, not drawn as "no detour anywhere"');
   const {p:p2,m:m2}=await mk(b,{fail:'detour_measured'});
