@@ -1,4 +1,12 @@
-# As-measured detour length: can the current architecture carry it?
+# As-measured detour length
+
+**Status, 13 October 2026: measured statewide.** All 14,262 NCDOT bridge
+structures, both modes, on a self-hosted North Carolina graph built from the
+OpenStreetMap extract of 12 October. Results and the findings they produced are
+in *Statewide run* at the end. Everything above that section is the design work
+that got there, kept because the reasons matter.
+
+## Can the current architecture carry it?
 
 Yes — for both measurements, and most of what it needs is already built. One
 piece of new infrastructure is required, and the measurement only becomes
@@ -208,3 +216,84 @@ reported instead of hidden.
 
 It also does not answer whether an oversize or overweight vehicle can use the
 detour. That is B.H.12–B.H.16 (clearances and widths), a separate group.
+
+## Statewide run — 13 October 2026
+
+Self-hosted Valhalla on the OSM North Carolina extract of 12 October. The graph
+built in 173 seconds. Against the public instance, the same code gave identical
+results to the hundredth of a mile on the three reference crossings, about 40x
+faster. The full pass took about 18 minutes on two cores. Pipeline:
+`tools/detour/` in the repo, re-runnable when the map updates.
+
+### Results
+
+| road on the bridge (bypass) | count | share |
+|---|---|---|
+| measured | 12,372 | 86.7% |
+| no detour — far side reachable only over this bridge | 1,066 | 7.5% |
+| bypass at the site | 639 | 4.5% |
+| unmeasured, with reason | 185 | 1.3% |
+
+Road beneath (collapse), only where NCDOT records a highway beneath: 5,339
+measured, 1,101 bypass at the site, 410 unmeasured, 7 no detour. Median
+additional travel when the road beneath closes: 2.06 mi; 90th percentile 6.23 mi.
+
+### What changed in the method, and why
+
+Each of these was found by running a sample and looking at what failed:
+
+- **NCDOT decides what gets measured; the map only measures it.** 72% of
+  structures are waterway-only by NCDOT's coding. Looking for "roads beneath" in
+  the map found driveways near creek bridges. A road beneath is now sought only
+  where NCDOT records a highway beneath. The reverse case, NCDOT saying a highway
+  is there and the map finding none, is reported as its own finding.
+- **Untagged bridges.** 14% of a sample had the road in the map but no bridge
+  tag on it, which is common for small creek crossings. The nearest road segment
+  is blocked instead, and with no junction between the bridge and the segment
+  ends that is the same closure. 2,272 decks were inferred this way and are
+  flagged `deck_inferred`. This is never done where NCDOT records a highway
+  beneath: at 780170, a closed SR1360 over US 220, the nearest road is US 220
+  itself.
+- **Dead ends.** 1,575 structures first failed because the traced anchors never
+  crossed the bridge. Re-anchored at the deck's own ends, 940 proved to be
+  bridges that are the only way to the far side (NO DETOUR), 619 measured
+  normally, and 16 stayed unmeasured.
+
+### Findings to take to NCDOT
+
+**Units: settled.** Reading NCDOT's code as miles fits better than reading it as
+kilometres on 95% of 11,005 structures. From code 10 upward, the median
+measured-to-code ratio is 1.03-1.04. The field is in miles.
+
+**Code 1 behaves like a default, not a measurement.** It is on 5,087 structures,
+36% of the state. On those, the measured additional travel runs a median 2.4x
+the code, 193 have no detour at all, and 337 have a bypass at the site. Agreement
+improves steadily with the code:
+
+| code | n | median measured / code | within +/-50% |
+|---|---|---|---|
+| 1 | 4,489 | 2.42 | 24% |
+| 2 | 1,950 | 1.99 | 27% |
+| 3-5 | 3,026 | 1.40 | 51% |
+| 6-9 | 1,283 | 1.11 | 73% |
+| 10-19 | 545 | 1.04 | 75% |
+| 20-98 | 263 | 1.03 | 80% |
+
+**Code 99 mostly means a dead end.** Of 1,225 structures coded 99, 777 (63%) are
+measured as NO DETOUR, found independently. 337 have a measurable detour, median
+5.0 mi, which is worth asking NCDOT about: either 99 means more than "no detour",
+or those detours use roads NCDOT doesn't count.
+
+Questions for the Structures Maintenance Unit: how code 1 is assigned; what 99
+means precisely; and whether B.H.17 will be submitted from this field.
+
+### Still open
+
+- **Pin drop, live.** A pin on a known structure can show that structure's
+  measured values. Measuring at an arbitrary point needs a routing service
+  running continuously, which is a hosting decision.
+- **Graph vintage.** Results are pinned to the 12 October 2026 extract. Re-run
+  when the map updates materially.
+- **Migration 0042.** Written and committed. It had not yet reached the database
+  as of this writing, because `apply_migration` timed out four times without
+  executing.
