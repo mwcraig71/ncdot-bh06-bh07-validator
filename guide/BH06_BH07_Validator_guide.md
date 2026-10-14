@@ -1,4 +1,4 @@
-# NCDOT SNBI BH06 / BH07 Validator — user guide
+# NCDOT SNBI BH Validator — user guide
 
 A single HTML file. Double-click it. Nothing to install, no ArcGIS licence, and no login needed
 to read anything.

@@ -270,13 +270,29 @@ const fields=l=>{const out=[];let cur='',q=false;
   await p.waitForFunction(()=>!!document.querySelector('.leaflet-popup-content'),null,{timeout:30000});
   const pop=await p.evaluate(()=>document.querySelector('.leaflet-popup-content').innerText);
   console.log('   '+pop.replace(/\n+/g,' | ').slice(0,260));
-  ok('on the carried road: the bridge’s own detour and its code',
-     /If bridge 590819 closes: 1\.9 mi extra . NCDOT codes 2 mi \(B\.H\.17\)/.test(pop),true);
+  ok('BH06, BH07 and the AADT for the road here are the first three lines',
+     /^THE ROAD AT THIS POINT\s*BH06 here\s*10000085060\s*BH07 here\s*2\.672\s*Traffic\s*/i.test(pop),true);
+  ok('then the calculated detour for the bridge, named',/Calculated detour length · bridge 590819/.test(pop),true);
+  ok('...the bridge closed, with NCDOT’s code beside it',
+     /On the bridge\s*1\.9 mi extra · NCDOT codes 2 mi \(B\.H\.17\)/.test(pop),true);
+  ok('...and every road beneath closed, both shown whichever road the pin landed on',
+     /Road beneath\s*I 485 Inner: 1\.3 mi extra/.test(pop)&&/Road beneath\s*I 485 Outer: no detour/.test(pop),true);
+  ok('the detour comes before the reading of the route',pop.indexOf('Calculated detour')<pop.indexOf('Route here'),true);
   const popB=await p.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590819');
     const d=document.createElement('div'); d.innerHTML=detourPop(b,{loc:'B'}); return d.innerText;});
-  ok('on a road beneath: the detour if THAT road closes, per road',
-     /If the road under 590819 closes \(I 485 Inner\): 1\.3 mi extra/.test(popB)&&
-     /\(I 485 Outer\): no detour/.test(popB),true);
+  ok('a pin on a road beneath shows the same two together',
+     /On the bridge\s*1\.9 mi extra/.test(popB)&&/I 485 Inner: 1\.3 mi extra/.test(popB),true);
+  ok('the popup is capped to the map’s height so it scrolls on a phone',
+     await p.evaluate(()=>{const o=map._popup&&map._popup.options; return !!o&&o.maxHeight>=170&&o.maxHeight<=map.getSize().y;}),true);
+  const near=await p.evaluate(async()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590819'); map.closePopup(); SEL=null; PINTARGET=null;
+    await pinAt(Number(b.LAT_DD)+0.0003,Number(b.LONG_DD));
+    const ps=[...document.querySelectorAll('.leaflet-popup-content')]; const t=ps[ps.length-1].innerText;
+    const far=pinNearestStructure(Number(b.LAT_DD)+0.05,Number(b.LONG_DD),120);
+    return {t,far:far&&far.BRDG_NBR};});
+  ok('with no bridge open, the pin uses the nearest structure within 120 m, and says so',
+     /bridge 590819 \(nearest to the pin\)/.test(near.t),true);
+  ok('...and claims none when nothing is that close',near.far,null);
   ok('with no bridge open, the pin claims no detour at all',
      await p.evaluate(()=>detourPop(null,null)),'');
   ok('a structure outside the run adds nothing to the popup',
@@ -334,9 +350,13 @@ const fields=l=>{const out=[];let cur='',q=false;
   console.log('   '+fb.pop.slice(0,240));
   ok('no "pin drop failed" when NCDOT’s tool fails',fb.toasts.some(t=>/failed/i.test(t)),false);
   ok('the nearest route on the road layer, and the milepoint read off its geometry',
-     /LRS route ID here \| 10000085060/.test(fb.pop)&&/Milepoint here, on that route \| 2\.200/.test(fb.pop),true);
+     /BH06 here \| 10000085060/.test(fb.pop)&&/BH07 here \| 2\.200/.test(fb.pop),true);
   ok('...and the popup says where the answer came from',/Read from NCDOT’s road layer/.test(fb.pop),true);
   ok('a second pin does not wait on the broken tool again',fb.n1===1&&fb.n2===1,true);
+
+  console.log('\n7d. The tool is named for the BH items, not just BH06 and BH07');
+  ok('the page title and the heading read "NCDOT SNBI BH Validator"',
+     await p.evaluate(()=>/^NCDOT SNBI BH Validator/.test(document.title)&&document.querySelector('header h1').textContent.trim()==='NCDOT SNBI BH Validator'),true);
 
   console.log('\n7c. The table can show bridges only');
   const grp=await p.evaluate(()=>{

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NCDOT SNBI BH06 / BH07 Validator</title>
+<title>NCDOT SNBI BH Validator</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Oswald:wght@300;400;500;700&family=Open+Sans:wght@300;400;600;700&family=Lato:wght@100;300;400;700&display=swap">
 <style>
@@ -357,6 +357,14 @@ body.field.sheet #fieldbar{background:var(--orange)}
 .leaflet-container{font-family:var(--font-b)}
 .leaflet-popup-content-wrapper{border-radius:0;box-shadow:0 2px 8px rgba(0,0,0,.18)}
 .leaflet-popup-content{margin:11px 13px;font-size:12.5px;line-height:1.55}
+/* Scrolls inside on a phone, without dragging the map or the page behind it. */
+.leaflet-popup-scrolled{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;
+  touch-action:pan-y;border-bottom:0;border-top:0}
+.pop-row{display:grid;grid-template-columns:98px 1fr;gap:8px;align-items:baseline;padding:2px 0;font-size:12.5px}
+.pop-row .k{color:#5A5A5A;font-size:11.5px}
+.pop-row .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+.pop-row .v.mono{font-size:14.5px}
+.pop-sub{margin-top:8px;padding-top:6px;border-top:1px solid #ddd;font-size:11.5px;color:var(--black)}
 .pop-t{font-family:var(--font-h);font-size:14px;font-weight:500;text-transform:uppercase;color:var(--black);
   border-bottom:2px solid var(--orange);padding-bottom:3px;margin-bottom:6px}
 .pop-k{color:var(--gray-2);font-size:11px}
@@ -433,7 +441,7 @@ body.field #apprbtn{display:none}
 <header>
   <img src="data:image/png;base64,__LOGO_B64__" alt="Strinteg Corporation">
   <div class="hdr-t">
-    <h1>NCDOT SNBI BH06 / BH07 Validator</h1>
+    <h1>NCDOT SNBI BH Validator</h1>
     <div class="sub">LRS Route ID &amp; Milepoint &middot; FHWA rules + QC &middot; Live NCDOT GIS</div>
   </div>
   <div class="hdr-sp"></div>
@@ -704,7 +712,7 @@ body.field #apprbtn{display:none}
 <!--SBJS--><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script><!--/SBJS-->
 <script>
 /* ==========================================================================
-   NCDOT SNBI BH06 / BH07 Validator
+   NCDOT SNBI BH Validator
    Strinteg Corporation
    All data is read live from NCDOT's public ArcGIS REST services. No login.
    ========================================================================== */
@@ -2705,14 +2713,14 @@ function trafficRows(b,f){
 /* The same three items, in the popup's own idiom. Short, because a popup is
    read standing up: the number, the year it was counted, and whether it was
    counted at all. */
-function trafficPop(t){
+function trafficPop(t,top){
   if(!t) return '<div class="pop-k" style="margin-top:7px;color:#C9A227">No AADT covers this point &mdash; '+
     'no count station governs it and no estimate reaches it.</div>';
   const est=t.basis==='probe';
   return '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px">'+
       'Traffic here'+(est?' &mdash; <b style="color:#C9A227">estimated</b>':'')+'</div>'+
-    '<div class="pop-v" style="font-size:15px">'+t.aadt.toLocaleString()+
-      ' <span style="font-size:11px;color:#5A5A5A">AADT (BH09)</span></div>'+
+    (top?'':'<div class="pop-v" style="font-size:15px">'+t.aadt.toLocaleString()+
+      ' <span style="font-size:11px;color:#5A5A5A">AADT (BH09)</span></div>')+
     (est&&t.lo!=null&&t.hi!=null
       ? '<div class="pop-k">95% confidence '+t.lo.toLocaleString()+' to '+t.hi.toLocaleString()+
         ' &mdash; probe data, not a count</div>'
@@ -2899,24 +2907,39 @@ function detourPanel(b){
 /* The pin, in the popup's own idiom: the detour that matters for the road the
    pin landed on - the bridge's own if it is carried, the road-beneath one if
    it passes under. */
-function detourPop(b,hit){
+function detourPop(b,hit,why){
+  /* The popup's detour rows: the bridge closed AND each road beneath closed,
+     both, whichever road the pin landed on - an inspector on a phone asked to
+     see the two together near the top rather than only the one that matched. */
   if(!b) return '';
   const d=detourOf(b), c=bh17(b);
   if(!d||!d.bypass) return '';
-  const short=r=>r.verdict==='ok'?r.additional_mi.toFixed(1)+' mi extra'
+  const short=r=>r.verdict==='ok'?'<b>'+r.additional_mi.toFixed(1)+' mi extra</b>'
     :r.verdict==='bypass_at_site'?'a way past at the site'
     :r.verdict==='no_detour'?'<b style="color:#CF3910">no detour</b>':'not measured';
-  let h='<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px">Detour length</div>';
-  if(!hit||hit.loc==='C')
-    h+='<div class="pop-k">If bridge <b>'+esc(b.BRDG_NBR)+'</b> closes: '+short(d.bypass)+
-       ' &middot; NCDOT codes '+esc(c.label)+' (B.H.17)</div>';
-  else{
-    const u=d.under.filter(r=>r.verdict!=='none_beneath');
-    h+=u.length? u.map(r=>'<div class="pop-k">If the road under <b>'+esc(b.BRDG_NBR)+'</b> closes'+
-        (r.road?' ('+esc(r.road)+')':'')+': '+short(r)+'</div>').join('')
-      : '<div class="pop-k">No road-beneath detour measured for '+esc(b.BRDG_NBR)+'</div>';
-  }
+  let h='<div class="pop-sub">Calculated detour length &middot; bridge <b>'+esc(b.BRDG_NBR)+'</b>'+
+    (why?' <span style="color:#5A5A5A">('+esc(why)+')</span>':'')+'</div>';
+  h+='<div class="pop-row"><span class="k">On the bridge</span><span class="v">'+short(d.bypass)+
+     ' &middot; NCDOT codes '+esc(c.label)+' (B.H.17)</span></div>';
+  const u=d.under.filter(r=>r.verdict!=='none_beneath');
+  if(u.length) u.forEach(r=>{ h+='<div class="pop-row"><span class="k">Road beneath</span><span class="v">'+
+      (r.road?esc(r.road)+': ':'')+short(r)+'</span></div>'; });
+  else h+='<div class="pop-row"><span class="k">Road beneath</span><span class="v" style="color:#5A5A5A">'+
+      'NCDOT records no highway beneath</span></div>';
   return h;
+}
+
+/* The structure a pin is about when none is open: the nearest one to the point,
+   within 120 m. On a phone the panel covers the map, so it is usually closed
+   when the pin is dropped, and the detour would otherwise not show at all. */
+function pinNearestStructure(lat,lon,maxM){
+  const R=6371000, rad=Math.PI/180; let best=null;
+  ALL.forEach(b=>{
+    const la=Number(b.LAT_DD), lo=Number(b.LONG_DD); if(!isFinite(la)||!isFinite(lo)) return;
+    const x=(lo-lon)*rad*Math.cos((la+lat)/2*rad), y=(la-lat)*rad, d=Math.hypot(x,y)*R;
+    if(d<=maxM&&(!best||d<best.d)) best={b,d};
+  });
+  return best?best.b:null;
 }
 
 function validateFeature(b,f){
@@ -4477,17 +4500,37 @@ async function pinAt(lat,lon){
       }
     }
     const hit=sel?featuresOf(sel).find(f=>f.rid===at.RID):null;
-    L.popup({maxWidth:340}).setLatLng([lat,lon]).setContent(
-      '<div class="pop-t">The road at this point</div>'+
-      '<div class="pop-k">LRS route ID here</div><div class="pop-v" style="font-size:15px">'+esc(at.RID||'—')+'</div>'+
+    /* The bridge the detour rows describe: the open one, or else the nearest. */
+    const dbr=sel||pinNearestStructure(lat,lon,120);
+    if(dbr&&detourOf(dbr)===undefined){ try{ await loadDetour([bnKey(dbr)]); }catch(e){} }
+    /* On a phone the map is short and the popup used to run off the bottom with
+       no way to reach the rest. It is capped to the room the map has, below the
+       zoom and pin buttons and above the field bar, and scrolls inside. */
+    const mapEl=map.getContainer(), mr=mapEl.getBoundingClientRect();
+    const fbEl=$('fieldbar'), fr=fbEl&&getComputedStyle(fbEl).display!=='none'?fbEl.getBoundingClientRect():null;
+    const below=fr?Math.max(0,mr.bottom-fr.top):0;
+    const popMax=Math.max(170,Math.round(mr.height-below-96));
+    /* What matters is at the top: BH06, BH07 and AADT for the road here, then the
+       calculated detour both ways. The reading of it - which road this is, where
+       the answer came from - follows below. */
+    const top='<div class="pop-t">The road at this point</div>'+
+      '<div class="pop-row"><span class="k">BH06 here</span><span class="v mono">'+esc(at.RID||'—')+'</span></div>'+
+      '<div class="pop-row"><span class="k">BH07 here</span><span class="v mono">'+
+        (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</span></div>'+
+      '<div class="pop-row"><span class="k">Traffic</span><span class="v">'+
+        (ptr?'<span class="mono">'+ptr.aadt.toLocaleString()+'</span> AADT (BH09)'+
+             (ptr.basis==='probe'?' <b style="color:#C9A227">estimated</b>':'')
+            :'<span style="color:#C9A227">no AADT here</span>')+'</span></div>'+
+      detourPop(dbr,hit,sel?'open in the panel':'nearest to the pin');
+    L.popup({maxWidth:340,maxHeight:popMax,autoPanPaddingTopLeft:L.point(12,64),
+             autoPanPaddingBottomRight:L.point(12,below+12)}).setLatLng([lat,lon]).setContent(
+      top+
+      '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px">Route here</div>'+
       (at._local?'<div class="pop-k" style="margin-top:2px;text-transform:none;letter-spacing:0">Read from NCDOT\u2019s road layer: its route/milepost tool is not answering.</div>':'')+
       (d?'<div class="pop-k" style="margin-top:2px">'+esc(d.prefix+'-'+d.num+' · '+d.invName+' · '+d.cntyName+' County')+'</div>':'')+
-      '<div class="pop-k" style="margin-top:7px">Milepoint here, on that route</div><div class="pop-v" style="font-size:15px">'+
-        (at.MEAS==null?'—':Number(at.MEAS).toFixed(3))+'</div>'+
-      (at.StreetName?'<div class="pop-k" style="margin-top:7px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
-      (conc.length?'<div class="pop-k" style="margin-top:7px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
-      trafficPop(ptr)+
-      detourPop(sel,hit)+
+      (at.StreetName?'<div class="pop-k" style="margin-top:2px">'+esc(at.RouteName||'')+' &middot; '+esc(at.StreetName)+'</div>':'')+
+      (conc.length?'<div class="pop-k" style="margin-top:2px">Concurrent: '+conc.map(esc).join(', ')+'</div>':'')+
+      trafficPop(ptr,true)+
       '<div class="pop-k" style="margin-top:9px;border-top:1px solid #ddd;padding-top:6px;line-height:1.45">'+
       (sel
         ? (hit

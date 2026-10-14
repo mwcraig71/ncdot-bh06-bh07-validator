@@ -60,14 +60,14 @@ open('NCDOT_BH06_BH07_Validator_artifact.html','w').write(b)
 # all three builds now carry exactly the same code. The only difference here is
 # public-page metadata.
 def public_meta(src):
-    src=src.replace('<title>NCDOT SNBI BH06 / BH07 Validator</title>',
-      '<title>NCDOT SNBI BH06 / BH07 Validator \u2014 Strinteg</title>\n'
+    src=src.replace('<title>NCDOT SNBI BH Validator</title>',
+      '<title>NCDOT SNBI BH Validator \u2014 Strinteg</title>\n'
       '<meta name="description" content="Free browser tool that validates SNBI items BH06 (LRS Route ID) and '
       'BH07 (LRS Milepoint) for every North Carolina bridge against FHWA\'s published rules and NCDOT\'s live GIS. '
       'By Strinteg Corporation.">\n'
       '<meta name="robots" content="index,follow">\n'
       '<meta property="og:type" content="website">\n'
-      '<meta property="og:title" content="NCDOT SNBI BH06 / BH07 Validator">\n'
+      '<meta property="og:title" content="NCDOT SNBI BH Validator">\n'
       '<meta property="og:description" content="Validate BH06 and BH07 for any NC bridge, route, county or the whole '
       'state against FHWA rules, NCDOT\'s LRS and the FHWA HPMS submittal. Runs entirely in your browser.">\n'
       '<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' viewBox=\'0 0 32 32\'%3E'

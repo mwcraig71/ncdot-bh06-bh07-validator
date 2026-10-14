@@ -1,4 +1,4 @@
-# NCDOT SNBI BH06 / BH07 Validator
+# NCDOT SNBI BH Validator
 
 Validates the two SNBI items most likely to fail a North Carolina bridge submission —
 **BH06 (LRS Route ID)** and **BH07 (LRS Milepoint)** — for any bridge, route, county, or all

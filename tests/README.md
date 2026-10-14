@@ -215,7 +215,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **60** traffic, **80** detour — 489 in all.
+**49** approvals, **60** traffic, **88** detour — 497 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.
