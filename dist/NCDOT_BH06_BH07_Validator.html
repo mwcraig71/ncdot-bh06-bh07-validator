@@ -3519,37 +3519,41 @@ async function detourCheck(scope,quiet){
     ' structures measured, '+dead.toLocaleString()+' with no way around.',9000);
 }
 
-/* One measured value, with what it is and how it was got.
+/* One measured value, in plain words.
 
-   The headline is the EXTRA distance the closure costs. It is measured between
-   two points on the road, one each side of the structure, as the route with
-   the structure open against the route with it closed. Those two points sit
-   just past the ends of the structure where that gives a sound measurement,
-   and further out where it cannot - on an interstate, out to where traffic can
-   leave. So the open route between them can be miles long, and it is NOT the
-   distance across the structure: that is the structure's own length (or, for a
-   road beneath, the deck's width), which is shown as such. An earlier version
-   labelled the open route "straight across", which read as a 4-mile bridge. */
+   The headline is the EXTRA distance the closure costs: the trip between two
+   points on the road, one each side of the structure, with it closed against
+   with it open. Where the road allows, those points sit at the ends of the
+   structure. Where it does not - a divided highway with no way off near the
+   bridge - they move out to where a driver can leave, and the sentence says how
+   far out, so a 1.0 mi "normal" trip is not mistaken for the bridge.
+
+   Two earlier versions got this wrong. The first called the open trip "straight
+   across", which read as a 4-mile bridge. The second added the structure's
+   length beside it, which is not part of the measurement and is already in the
+   inventory section, so it is gone. */
+function detourDist(d){
+  if(Math.abs(d-0.25)<1e-6) return 'a quarter mile';
+  if(Math.abs(d-0.5)<1e-6) return 'half a mile';
+  return (d<1?d.toFixed(2):String(Math.round(d*10)/10))+' mi';
+}
 function detourVal(r,b,mode){
   const sub=s=>'<div style="color:#5A5A5A;font-size:11.5px">'+s+'</div>';
   const how=[r.deck_inferred?'deck inferred: the map has the road but does not mark the bridge':'',
              r.width_assumed?'deck width assumed (30 ft)':''].filter(Boolean).join(' &middot; ');
-  const sn=b&&b._snbi, ft=v=>v==null||v===''||!isFinite(Number(v))||Number(v)<=0?null:Math.round(Number(v));
-  const span=mode==='collapse'
-    ? (ft(sn&&sn.bridge_deck_width)!=null?'The deck over it is '+ft(sn.bridge_deck_width)+' ft wide.':'')
-    : (ft(sn&&sn.structure_length)!=null?'The structure itself is '+ft(sn.structure_length)+' ft long.':'');
-  const between=r.probe_mi==null?'':
-    'Measured between two points '+(r.probe_mi<0.2?'just past each end of the structure':
-      r.probe_mi.toFixed(r.probe_mi<1?2:0)+' mi either side of it')+
-    (r.direct_mi!=null&&r.around_mi!=null
-      ? ': '+r.direct_mi.toFixed(2)+' mi between them with it open, '+r.around_mi.toFixed(2)+' mi with it closed.'
-      : '.');
+  const near=r.probe_mi==null||r.probe_mi<0.2, both=r.direct_mi!=null&&r.around_mi!=null;
+  const trip=!both?'':near
+    ? 'Normally '+r.direct_mi.toFixed(1)+' mi '+(mode==='collapse'?'from one side of the bridge to the other':'from one end of the bridge to the other')+
+      '; '+r.around_mi.toFixed(1)+' mi with it closed.'
+    : 'No way off the road near the bridge, so the trip is measured from '+detourDist(r.probe_mi)+' before it to '+
+      detourDist(r.probe_mi)+' past it: normally '+r.direct_mi.toFixed(1)+' mi, '+r.around_mi.toFixed(1)+' mi with '+
+      (mode==='collapse'?'the road closed under the bridge.':'the bridge closed.');
   if(r.verdict==='ok')
     return '<span class="mono" style="font-size:14px">'+r.additional_mi.toFixed(1)+' mi</span> extra with it closed'+
-      sub([span,between].filter(Boolean).join(' '))+(how?sub(how):'');
+      (trip?sub(trip):'')+(how?sub(how):'');
   if(r.verdict==='bypass_at_site')
     return '<span class="mono">'+(r.additional_mi||0).toFixed(2)+' mi</span> extra &mdash; a way past at the site'+
-      (span?sub(span):'')+(how?sub(how):'');
+      (how?sub(how):'');
   if(r.verdict==='no_detour')
     return '<span style="color:#CF3910;font-weight:600">No detour</span>'+sub(esc(r.reason||''));
   return '<span style="color:#C9A227">Not measured</span>'+sub(esc(r.reason||''));
@@ -3560,7 +3564,7 @@ function detourVal(r,b,mode){
 function detourPanel(b){
   const c=bh17(b), d=detourOf(b);
   let h='<div class="dr-sec">Detour length &mdash; B.H.17</div>'+
-    '<dl class="kv" style="grid-template-columns:118px 1fr">'+
+    '<dl class="kv" style="grid-template-columns:132px 1fr">'+
     '<dt>NCDOT coded</dt><dd class="mono">'+
       (c.code==null?'<span style="color:#5A5A5A">'+esc(c.label)+'</span>':esc(c.label))+
       '<div style="color:#5A5A5A;font-size:11.5px;font-family:var(--font-b,inherit)">B.H.17 as published, in miles</div></dd>';
@@ -3569,15 +3573,15 @@ function detourPanel(b){
   if(d===null||!d.bypass)
     return h+'<dt>Measured</dt><dd style="color:#5A5A5A;font-size:12px">not measured &mdash; this structure '+
       'was not in the statewide run</dd></dl>';
-  h+='<dt>Road on the bridge</dt><dd>'+detourVal(d.bypass,b,'bypass')+'</dd>';
+  h+='<dt>Calculated detour length</dt><dd>'+detourVal(d.bypass,b,'bypass')+'</dd>';
   const under=d.under.filter(r=>r.verdict!=='none_beneath');
   if(under.length) under.forEach(r=>{
-    h+='<dt>Road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r,b,'collapse')+'</dd>'; });
+    h+='<dt>Calculated detour length, road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r,b,'collapse')+'</dd>'; });
   else{ const nb=d.under.find(r=>r.verdict==='none_beneath');
-    h+='<dt>Road beneath</dt><dd style="color:#5A5A5A;font-size:12px">'+esc(nb?nb.reason:'no road-beneath measurement recorded')+'</dd>'; }
+    h+='<dt>Calculated detour length, road beneath</dt><dd style="color:#5A5A5A;font-size:12px">'+esc(nb?nb.reason:'no road-beneath measurement recorded')+'</dd>'; }
   return h+'</dl><div style="font-size:11.5px;color:#5A5A5A;margin:-2px 0 8px">Measured on the road network ('+
-    esc(d.vintage)+'). The road on the bridge with its deck closed and the road beneath open; each road '+
-    'beneath with the ground under the span closed and the deck open. Minimum distance only &mdash; nothing '+
+    esc(d.vintage)+'). Calculated with the bridge closed and any road beneath it open; for a road beneath, '+
+    'with that road closed under the span and the bridge open. Minimum distance only &mdash; nothing '+
     'on the way around is checked for clearance, posting or width.</div>';
 }
 

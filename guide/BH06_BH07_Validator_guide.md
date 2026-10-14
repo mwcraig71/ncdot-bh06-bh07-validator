@@ -716,10 +716,10 @@ network**, and keeps the two apart, so where they disagree you can see it.
 For every bridge, culvert and pipe, 19,676 structures, on a road graph built from the
 OpenStreetMap extract of 12 October 2026:
 
-- **The road on the bridge.** The deck is closed and the road beneath is left open, so a detour
+- **Calculated detour length** (the road on the bridge). The deck is closed and the road beneath is left open, so a detour
   may drop down, pass under and come back up. The figure is the shortest way from one side to the
   other.
-- **Each road beneath**, wherever NCDOT records a highway under the structure. The ground under
+- **Calculated detour length, road beneath**, for each road beneath, wherever NCDOT records a highway under the structure. The ground under
   the span is closed and the deck left open, so a detour may cross on the bridge where a ramp
   connects them.
 
@@ -737,15 +737,15 @@ and never reads them as miles.
 
 ### What every answer can be
 
-- **A distance**: the extra miles the closure costs. Under it, the structure's own length (or, for a
-  road beneath, the deck's width), and the two points the extra was measured between.
+- **A distance**: the extra miles the closure costs, with the trip it was measured on in plain words.
 
-  Those two points need explaining. On a local road they sit just past each end of the structure.
-  On an interstate they cannot, because there is nowhere to turn off at the end of the bridge, so
-  they move out until each one is somewhere traffic can leave and rejoin: often the next
-  interchange. The panel then reads, say, "measured between two points 2 mi either side of it:
-  4.04 mi between them with it open, 5.58 mi with it closed". The 4.04 mi is the road between the
-  two interchanges, not the width of the river. The detour is the difference, 1.54 mi.
+  On most roads the trip runs from one end of the bridge to the other: "Normally 0.1 mi from one end
+  of the bridge to the other; 2.0 mi with it closed." On a divided highway it cannot, because there
+  is no way off at the end of the bridge, so the trip starts and ends where a driver can leave and
+  rejoin. Bridge 590141, Billy Graham Parkway northbound over Sugar Creek, reads: "No way off the
+  road near the bridge, so the trip is measured from half a mile before it to half a mile past it:
+  normally 1.0 mi, 5.5 mi with the bridge closed." The 1.0 mi is the road between those two points,
+  not the bridge. The detour is the difference, 4.5 mi.
 - **A way past at the site**: closing it costs next to nothing.
 - **No detour**: the far side is reachable only over this structure. This is an answer, not a
   failure, and it agrees with NCDOT's 99 on 64% of the structures coded 99.
@@ -772,8 +772,8 @@ so 30 ft was used.
 
 ### Where it shows
 
-A **Detour length** section in the bridge panel, after the features: the code first, then the road
-on the bridge, then each road beneath by name. Two table columns, **BH17 coded** and **Detour
+A **Detour length** section in the bridge panel, after the features: the code first, then the
+calculated detour length, then each road beneath by name. Two table columns, **BH17 coded** and **Detour
 measured**, both numeric for filtering and sorting: `>10` finds long detours, and `-` finds the
 ones with nothing measured. The CSV has `BH17_NCDOT_CODE`, `BH17_MEANING`, `DETOUR_MEASURED`,
 `DETOUR_EXTRA_MI`, `DETOUR_MEASURED_EACH_SIDE_MI` (how far out the two measuring points sit),

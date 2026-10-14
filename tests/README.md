@@ -198,9 +198,11 @@ last section fails the read and asserts the tool says "not looked up" rather tha
 drawing an empty state, and raises no finding on missing data.
 
 It also pins three fixes from the 13 October review. The panel never calls the
-route between the measuring points "straight across": on an interstate those
-points sit out at the interchanges, so that route can be miles long, and the panel
-names it for what it is. The pin finds NCDOT's route/milepost tool again if it is
+trip between the measuring points "straight across": on a divided highway those
+points sit out where a driver can leave, so that trip can be a mile or more, and
+the panel says so in plain words. It does not repeat the structure's length,
+which is not part of the measurement, and heads the values "Calculated detour
+length" and "Calculated detour length, road beneath". The pin finds NCDOT's route/milepost tool again if it is
 renamed, and when the tool fails on NCDOT's side it reads the route and milepoint
 off the Road Characteristics geometry instead, says so in the popup, and does not
 wait on the broken tool for the next pin. And the switch above the table shows
@@ -213,7 +215,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **60** traffic, **77** detour — 486 in all.
+**49** approvals, **60** traffic, **80** detour — 489 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

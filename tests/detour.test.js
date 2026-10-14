@@ -179,25 +179,30 @@ const fields=l=>{const out=[];let cur='',q=false;
   const t819=await p.evaluate(()=>{select('590819',true); return document.getElementById('dr-body').innerText;});
   ok('a Detour length section, named for B.H.17',/Detour length.{0,4}B\.H\.17/i.test(t819),true);
   ok('NCDOT’s coded value, in miles',/NCDOT coded\s*2 mi/i.test(t819),true);
-  ok('the road on the bridge: the extra miles with the deck closed',/Road on the bridge\s*1\.9 mi extra/i.test(t819),true);
-  ok('...and where it was measured between, with both route lengths',
-     /Measured between two points just past each end of the structure: 0\.14 mi between them with it open, 2\.00 mi with it closed/.test(t819),true);
-  ok('...never called "straight across": the anchor route is not the bridge',/straight across/i.test(t819),false);
-  ok('the bridge’s own length is the reference, in feet, where NCDOT gives one',
-     await p.evaluate(()=>{const b=ALL.find(x=>x.BRDG_NBR==='590819'); const L=b._snbi&&Number(b._snbi.structure_length);
-       return !(L>0) || document.getElementById('dr-body').innerText.includes('The structure itself is '+Math.round(L)+' ft long.');}),true);
+  ok('headed "Calculated detour length": the extra miles with the deck closed',
+     /Calculated detour length\s*1\.9 mi extra/i.test(t819),true);
+  ok('...and the trip in plain words, measured from the ends of the bridge',
+     /Normally 0\.1 mi from one end of the bridge to the other; 2\.0 mi with it closed\./.test(t819),true);
+  ok('...never called "straight across": the measured trip is not the bridge',/straight across/i.test(t819),false);
+  ok('the structure’s own length is not repeated here: it is not part of the measurement',
+     /The structure itself is/.test(t819),false);
   const t819far=await p.evaluate(()=>{const d=DETOUR.get('590819'); const o=d.bypass;
-    d.bypass=Object.assign({},o,{probe_mi:2,direct_mi:4.04,around_mi:5.58,additional_mi:1.54});
+    d.bypass=Object.assign({},o,{probe_mi:0.5,direct_mi:1.001,around_mi:5.537,additional_mi:4.535});
     select('590819',true); const t=document.getElementById('dr-body').innerText; d.bypass=o; return t;});
-  ok('an interstate measured from 2 mi out says so, rather than calling 4 mi the way across',
-     /1\.5 mi extra[\s\S]{0,200}Measured between two points 2 mi either side of it: 4\.04 mi between them with it open, 5\.58 mi with it closed/i.test(t819far),true);
+  ok('a divided road measured from half a mile out says why, and where the trip starts and ends (as 590141)',
+     /4\.5 mi extra[\s\S]{0,40}No way off the road near the bridge, so the trip is measured from half a mile before it to half a mile past it: normally 1\.0 mi, 5\.5 mi with the bridge closed\./i.test(t819far),true);
+  ok('each road beneath is headed "Calculated detour length, road beneath"',
+     (t819.match(/Calculated detour length, road beneath/gi)||[]).length,2);
+  ok('...and its trip is told for the road closed under the bridge',
+     /from 1 mi before it to 1 mi past it: normally 1\.8 mi, 3\.1 mi with the road closed under the bridge\./.test(t819),true);
+  ok('"Road on the bridge" is gone as a heading',/Road on the bridge/i.test(t819),false);
   ok('each road beneath has its own line, by name',/I 485 Inner/.test(t819)&&/I 485 Outer/.test(t819),true);
   ok('...and a dead end beneath says so, with its reason',/No detour[\s\S]{0,40}no way around within 8 mi/.test(t819),true);
   ok('the graph it was measured on is named',t819.includes(V),true);
   ok('...and what it does not check is said',/nothing on the way around is checked for clearance, posting or width/.test(t819),true);
 
   const t213=await p.evaluate(()=>{select('590213',true); return document.getElementById('dr-body').innerText;});
-  ok('a dead end reads "No detour", not a number',/Road on the bridge\s*No detour/i.test(t213),true);
+  ok('a dead end reads "No detour", not a number',/Calculated detour length\s*No detour/i.test(t213),true);
   ok('...the finding sits with the structure’s QC findings',/B\.H\.17 gives a detour, but there is no other way across/.test(t213),true);
 
   const t668=await p.evaluate(()=>{select('590668',true); return document.getElementById('dr-body').innerText;});
