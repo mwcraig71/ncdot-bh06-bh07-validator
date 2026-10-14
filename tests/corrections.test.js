@@ -22,14 +22,15 @@ const mk=async(b)=>{
   await sbmock(p,{bridges});
   return {ctx,p};
 };
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+'  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+'  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 const st=(p,bn)=>p.evaluate(n=>{const b=ALL.find(x=>x.BRDG_NBR===n);
   return {rid:b._rid,mp:b._mp3,src:b._src,src6:b._src06,src7:b._src07,
           sev:b._sev,flags:b._flags.slice().sort(),off:b._off,stale:!!b._offStale};},bn);
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));

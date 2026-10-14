@@ -7,11 +7,12 @@ const {chromium}=require('playwright');const fs=require('fs');
 const sbmock=require('./fx/sbmock.js');
 const bridges=JSON.parse(fs.readFileSync('tests/fx/bridges.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const ctx=await b.newContext({acceptDownloads:true,viewport:{width:1700,height:1000}});
   const p=await ctx.newPage();
   const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept(''));

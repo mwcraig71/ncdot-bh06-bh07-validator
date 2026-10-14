@@ -18,7 +18,8 @@ const sbmock=require('./fx/sbmock.js');
 const FX=JSON.parse(fs.readFileSync('tests/fx/features.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 const TWIN={a:'590668',b:'590669'};          /* NC-51 NBL / SBL, 51 ft apart, both over US-74 */
@@ -75,7 +76,7 @@ const patchMock=()=>{
 
 (async()=>{
   patchMock();
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));
@@ -470,6 +471,78 @@ const patchMock=()=>{
        drawDetail(b);
        const n=document.querySelectorAll('a.rmf').length;
        return n>0&&n<featuresOf(b).length;}),true);
+
+  console.log('\n17. A highway bridge at an interchange is a highway (review C2)');
+  /* carriedIsHighway read s.ServiceOn, which the SNBI rows do not have, and then
+     treated every NBI code but 1 as "not a highway" - so Fill missing closed
+     interchange bridges as "BH06 not required". Same rule as carries_highway(). */
+  const hw=await p2.evaluate(()=>{
+    const t=(snbi,code)=>carriedIsHighway({_snbi:snbi, SERVICEON:code, F_CARRIED:'NC51 NBL'});
+    return {
+      interchange:t({service_on:'Overpass structure at an interchange or second level of a multi-level interchange'}),
+      third:t({service_on:'Third level (interchange)'}),
+      hwy:t({service_on:'Highway'}), hwyPed:t({service_on:'Highway-pedestrian'}),
+      rail:t({service_on:'Railroad'}), ped:t({service_on:'Pedestrian-bicycle'}),
+      code1:t(null,'1'), code4:t(null,'4'), code6:t(null,'6'), code8:t(null,'8'),
+      code2:t(null,'2'), code3:t(null,'3'),
+      real:['590668','590213','590819'].map(n=>carriedIsHighway(ALL.find(x=>x.BRDG_NBR===n)))};});
+  ok('an overpass at an interchange carries a highway',hw.interchange,true);
+  ok('...so does a third-level interchange',hw.third,true);
+  ok('...and highway, highway-pedestrian',hw.hwy&&hw.hwyPed,true);
+  ok('a railroad does not',hw.rail,false);
+  ok('a pedestrian bridge does not',hw.ped,false);
+  ok('NBI codes 1, 4, 6 and 8 are highways',hw.code1&&hw.code4&&hw.code6&&hw.code8,true);
+  ok('NBI codes 2 and 3 are not',hw.code2||hw.code3,false);
+  ok('590668 (NC 51), 590213 (I-77) and 590819 (I-85) carry a highway',hw.real.join(),'true,true,true');
+
+  console.log('\n18. BH06 coded to the road beneath is an error (review C1)');
+  /* A street name in Feature Carried silences CONCURRENCY, US-74's milepoint
+     lands on the bridge, and US-74 is in HPMS - so nothing else catches this. */
+  const under=await p2.evaluate(async()=>{
+    const b=ALL.find(x=>x.BRDG_NBR==='590668');
+    const keep={fc:b.F_CARRIED};
+    b.F_CARRIED='INDEPENDENCE CONNECTOR';
+    const r=rec('590668',true); r.fix06='20000074060'; r.fix07='20.955';
+    b._featDone=false; await expandOne(b); validate(b);
+    const wrong={flags:b._flags.slice(), sev:b._sev};
+    r.fix06=null; r.fix07=null; b.F_CARRIED=keep.fc;
+    b._featDone=false; await expandOne(b); validate(b);
+    return {wrong, right:b._flags.slice(),
+            others:['590669','590819'].map(n=>{const x=ALL.find(y=>y.BRDG_NBR===n);
+              return n+':'+x._flags.includes('BH06_CROSSES_DECK');})};});
+  console.log('   coded to US-74: '+under.wrong.flags.join(' '));
+  ok('US-74 coded on 590668 raises BH06_CROSSES_DECK',under.wrong.flags.includes('BH06_CROSSES_DECK'),true);
+  ok('...as an error, not a note',under.wrong.sev,'e');
+  ok('the correctly coded NC 51 does not',under.right.includes('BH06_CROSSES_DECK'),false);
+  ok('nor its twin, nor 590819 at a 70 degree skew',under.others.join(),'590669:false,590819:false');
+
+  console.log('\n19. A step that fails makes the run incomplete, not clean (review R2)');
+  await p2.route('**/rest/v1/route_extents**',r=>r.fulfill({status:500,contentType:'application/json',
+    body:JSON.stringify({message:'upstream timeout'})}));
+  await p2.evaluate(()=>runAll());
+  await p2.waitForTimeout(1500);
+  const inc=await p2.evaluate(()=>({toast:document.getElementById('toast').textContent, n:ALL.length}));
+  console.log('   '+inc.toast.slice(0,160));
+  ok('the closing message says INCOMPLETE',/INCOMPLETE/.test(inc.toast),true);
+  ok('...names the step that failed',/Deep check, route extents/.test(inc.toast),true);
+  ok('...and does not count anything as clean',/\bclean\b/.test(inc.toast.replace(/is not clean/,'')),false);
+  await p2.unroute('**/rest/v1/route_extents**');
+
+  console.log('\n20. A failed bridge query leaves nothing from the last run on screen (review R1)');
+  const before=await p2.evaluate(()=>ALL.length);
+  await p2.route('**/*Bridges/MapServer/0/query**',r=>r.fulfill({status:502,body:'Bad Gateway'}));
+  await p2.evaluate(()=>runAll());
+  await p2.waitForTimeout(1500);
+  const gone=await p2.evaluate(()=>({n:ALL.length, view:VIEW.length, sel:SEL,
+    rows:document.querySelectorAll('tr[data-b]').length,
+    csv:document.getElementById('csv').disabled,
+    toast:document.getElementById('toast').textContent}));
+  console.log('   '+before+' structures before; after: '+gone.n+'. '+gone.toast.slice(0,110));
+  ok('the previous run\'s structures are cleared',gone.n+'/'+gone.view,'0/0');
+  ok('...and no table rows are left',gone.rows,0);
+  ok('...and nothing can be exported from it',gone.csv,true);
+  ok('the message says the query failed, not "complete"',
+     /Query failed/.test(gone.toast)&&!/complete/i.test(gone.toast),true);
 
   console.log('\npage errors: '+JSON.stringify(errs.concat(e2)));
   await b.close();

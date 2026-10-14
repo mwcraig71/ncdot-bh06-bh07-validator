@@ -282,132 +282,149 @@ begin
   execute 'reset role';
 
   -- -------------------------------------------------- authenticated writes --
+  -- 0045: sign-ups are open, so a signed-in account may PROPOSE and nothing
+  -- else. Every direct write is refused by the grant, loudly; the only way in
+  -- is through the functions, which check who is calling.
   perform set_config('request.jwt.claims',
     json_build_object('sub',uid,'role','authenticated','email','michael.craig@strinteg.test',
                       'user_metadata', json_build_object('full_name','M. Craig'))::text, true);
   execute 'set local role authenticated';
 
-  -- identity is taken from the token, not from the request body
+  declare stmt text; what text;
   begin
-    insert into feature_values (feature_id, field, source, value_num, actor, reviewer_name, note)
-    values (fid,'BH07','REVIEWED',0.240,
-            '99999999-9999-9999-9999-999999999999','Somebody Else','Div 10 confirmed');
+    foreach stmt in array array[
+      format('insert into feature_values (feature_id,field,source,value_text) values (%L,''BH06'',''DERIVED'',''20000074060'')', fid),
+      format('insert into feature_values (feature_id,field,source,value_num) values (%L,''BH07'',''REVIEWED'',0.240)', fid),
+      format('insert into feature_values (feature_id,field,source,value_num) values (%L,''BH07'',''PROPOSED'',0.240)', fid),
+      format('update feature_values set value_num=9 where feature_id=%L', fid),
+      'insert into features (structure_number,designation,location_type) values (''TEST01'',''H02'',''C'')',
+      format('update features set withdrawn_at=now() where id=%L', fid),
+      format('update features set structure_number=''TEST99'' where id=%L', fid),
+      format('insert into review (feature_id,status,note) values (%L,''progress'',''x'')', fid),
+      format('insert into cleared_findings (feature_id,rule_id,action,reason) values (%L,''BH06_3_HPMS'',''clear'',''x'')', fid),
+      format('insert into feature_routes (feature_id,route_designation) values (%L,''R01'')', fid),
+      'update value_divergence set resolution=''x'''
+    ] loop
+      what := split_part(stmt,' (',1);
+      begin
+        execute stmt;
+        r := r || ('FAIL  a signed-in account could: '||what)::text;
+      exception when insufficient_privilege then
+        r := r || ('PASS  refused to a signed-in account: '||what)::text;
+      when others then
+        r := r || ('FAIL  refused for the wrong reason ('||sqlerrm||'): '||what)::text;
+      end;
+    end loop;
+  end;
+
+  -- proposing is the one write, and identity comes from the token
+  begin
+    perform propose_value('TEST01','H01','BH07','0.240','Div 10 confirmed');
     select actor, reviewer_name into got, t
-      from feature_values where feature_id=fid and field='BH07' and source='REVIEWED';
-    r := r || format('%s  a forged actor and name are overwritten from the token: ...%s / "%s"',
+      from feature_values where feature_id=fid and field='BH07' and source='PROPOSED';
+    r := r || format('%s  a proposal is stamped from the token: ...%s / "%s"',
           case when got=uid and t='M. Craig' then 'PASS' else 'FAIL' end, right(got::text,12), t);
-  exception when others then r := r || ('FAIL  reviewer could not write: '||sqlerrm)::text; end;
+  exception when others then r := r || ('FAIL  a signed-in account could not propose: '||sqlerrm)::text; end;
+
+  select bh07, bh07_source into n, s from feature_resolved where feature_id=fid;
+  r := r || format('%s  a proposal changes nothing until approved: still %s from %s',
+        case when n=0.227 and s='PUBLISHED' then 'PASS' else 'FAIL' end, n, s);
 
   begin
-    insert into feature_values (feature_id, field, source, value_text, derivation_method, confidence)
-    values (fid,'BH06','DERIVED','40401138060','nearest carried route','high');
-    r := r || 'PASS  a reviewer can write DERIVED - Fill missing runs client-side'::text;
-  exception when others then r := r || ('FAIL  DERIVED refused: '||sqlerrm)::text; end;
+    perform propose_value('TEST01','H01','BH07','0.241','re-measured');
+    select value_num into n from feature_values where feature_id=fid and field='BH07' and source='PROPOSED';
+    r := r || format('%s  the proposer may revise their own proposal: now %s',
+          case when n=0.241 then 'PASS' else 'FAIL' end, n);
+  exception when others then r := r || ('FAIL  could not revise own proposal: '||sqlerrm)::text; end;
 
   begin
-    insert into feature_values (feature_id, field, source, value_num, derivation_method, confidence)
-    values (fid,'BH07','DERIVED',0.231,'re-derive','medium')
-    on conflict (feature_id, field, source) do update set value_num=excluded.value_num;
-    r := r || 'PASS  a reviewer can upsert DERIVED'::text;
-  exception when others then r := r || ('FAIL  DERIVED upsert refused: '||sqlerrm)::text; end;
-
-  begin
-    insert into features (structure_number, designation, location_type, derivation_method, confidence)
-    values ('TEST01','H02','C','derived from carried text','medium');
-    r := r || 'PASS  a reviewer can upsert a feature'::text;
-  exception when others then r := r || ('FAIL  feature insert refused: '||sqlerrm)::text; end;
-
-  begin
-    insert into review (feature_id, status, note, reviewer_name)
-    values (fid,'progress','checking with Div 10','Totally Made Up');
-    r := r || 'PASS  a reviewer can set a status and leave a note'::text;
-  exception when others then r := r || ('FAIL  review write refused: '||sqlerrm)::text; end;
-
-  begin
-    insert into cleared_findings (feature_id, rule_id, action, reason, reviewer_name)
-    values (fid,'BH06_3_HPMS','clear','Ramp - HPMS carries none','Totally Made Up');
-    r := r || 'PASS  a reviewer can clear a finding'::text;
-  exception when others then r := r || ('FAIL  clear refused: '||sqlerrm)::text; end;
-
-  select reviewer_name into t from review where feature_id=fid;
-  r := r || format('%s  review is stamped from the token too, not from the body: "%s"',
-        case when t='M. Craig' then 'PASS' else 'FAIL' end, t);
-
-  -- PUBLISHED belongs to ingest, in both directions
-  begin
-    insert into feature_values (feature_id, field, source, value_text)
-    values (fid,'BH06','PUBLISHED','99999999999');
-    r := r || 'FAIL  a reviewer inserted PUBLISHED'::text;
-  exception when others then r := r || 'PASS  a reviewer cannot insert PUBLISHED'::text; end;
-
-  update feature_values set value_text='99999999999'
-   where feature_id=fid and field='BH06' and source='PUBLISHED';
-  get diagnostics hit = row_count;
-  select value_text into t from feature_values
-   where feature_id=fid and field='BH06' and source='PUBLISHED';
-  r := r || format('%s  a PUBLISHED row is invisible to a client UPDATE: %s rows hit, still %s',
-        case when hit=0 and t='40401138060' then 'PASS' else 'FAIL' end, hit, t);
-
-  -- nothing is removed, by any client role
-  begin
-    delete from feature_values where feature_id=fid and source='REVIEWED';
-    r := r || 'FAIL  a reviewer deleted a value'::text;
+    perform approve_proposal(fid,'BH07','looks right');
+    r := r || 'FAIL  a non-approver approved a proposal'::text;
   exception when insufficient_privilege then
-    r := r || 'PASS  DELETE on feature_values is not granted to a reviewer'::text;
-  when others then r := r || ('PASS  delete refused: '||sqlerrm)::text; end;
+    r := r || 'PASS  a non-approver cannot approve'::text; end;
+  execute 'reset role';
 
+  -- a second account cannot overwrite the first one's open proposal
+  perform set_config('request.jwt.claims',
+    json_build_object('sub',uid2,'role','authenticated','email','jsmith@ncdot.gov')::text, true);
+  execute 'set local role authenticated';
+  begin
+    perform propose_value('TEST01','H01','BH07','9.999','mine instead');
+    r := r || 'FAIL  another account replaced an open proposal'::text;
+  exception when insufficient_privilege then
+    r := r || 'PASS  another account cannot replace an open proposal'::text; end;
+  select value_num into n from feature_values where feature_id=fid and field='BH07' and source='PROPOSED';
+  r := r || format('%s  ...so it still holds the first proposer''s value: %s',
+        case when n=0.241 then 'PASS' else 'FAIL' end, n);
+
+  -- a reviewer with no display name set must not leak an address into a public table
+  begin
+    perform propose_value('TEST01','H01','BH06','40401138060',null);
+    select reviewer_name into t from feature_values where feature_id=fid and field='BH06' and source='PROPOSED';
+    r := r || format('%s  no display name falls back to the local part, not the address: "%s"',
+          case when t='jsmith' then 'PASS' else 'FAIL' end, t);
+  exception when others then r := r || ('FAIL  second account could not propose: '||sqlerrm)::text; end;
+
+  begin
+    perform trigger_ingest('bridges');
+    r := r || 'FAIL  a non-approver started an ingest'::text;
+  exception when insufficient_privilege then
+    r := r || 'PASS  a non-approver cannot start an ingest'::text; end;
+  execute 'reset role';
+
+  -- an approver accepts what they saw, and only that
+  insert into reviewer_roles (actor, role, display_name) values (uid2,'approver','J. Smith');
+  execute 'set local role authenticated';
+  begin
+    perform approve_proposal(fid,'BH07','checked',p_expected=>'0.240');
+    r := r || 'FAIL  an approval went through for a value the approver never saw'::text;
+  exception when serialization_failure then
+    r := r || 'PASS  approving a stale value is refused (the proposal is now 0.241)'::text; end;
+  begin
+    perform trigger_ingest('bridges', '{"off":0}'::jsonb);
+    r := r || 'FAIL  a resume cursor was accepted from a browser token'::text;
+  exception when insufficient_privilege then
+    r := r || 'PASS  even an approver cannot pass a resume cursor from the page'::text; end;
+  begin
+    perform approve_proposal(fid,'BH07','checked',p_expected=>'0.241');
+    select bh07, bh07_source into n, s from feature_resolved where feature_id=fid;
+    r := r || format('%s  approving the value on screen promotes it: %s from %s',
+          case when n=0.241 and s='REVIEWED' then 'PASS' else 'FAIL' end, n, s);
+  exception when others then r := r || ('FAIL  approval refused: '||sqlerrm)::text; end;
+  begin
+    insert into feature_values (feature_id,field,source,value_text) values (fid,'BH06','REVIEWED','99999999999');
+    r := r || 'FAIL  an approver wrote a REVIEWED value without the queue'::text;
+  exception when insufficient_privilege then
+    r := r || 'PASS  even an approver writes REVIEWED only through the queue'::text; end;
+  execute 'reset role';
+
+  -- nothing is removed or forged by any client role
+  execute 'set local role authenticated';
+  begin
+    delete from feature_values where feature_id=fid;
+    r := r || 'FAIL  a signed-in account deleted a value'::text;
+  exception when insufficient_privilege then
+    r := r || 'PASS  DELETE on feature_values is not granted'::text; end;
   begin
     delete from features where id=fid;
-    r := r || 'FAIL  a reviewer deleted a feature, cascading away a correction'::text;
+    r := r || 'FAIL  a signed-in account deleted a feature'::text;
   exception when insufficient_privilege then
-    r := r || 'PASS  DELETE on features is not granted - no sideways cascade'::text;
-  when others then r := r || ('PASS  feature delete refused: '||sqlerrm)::text; end;
-
+    r := r || 'PASS  DELETE on features is not granted - no sideways cascade'::text; end;
   begin
     insert into findings (feature_id, rule_id, severity) values (fid,'FAKE','note');
     r := r || 'FAIL  a client wrote a finding'::text;
   exception when others then r := r || 'PASS  a client cannot write findings - validation owns those'::text; end;
-
   begin
     insert into review_history (table_name,row_id,operation,after)
     values ('feature_values','x','INSERT','{}'::jsonb);
     r := r || 'FAIL  a client forged an audit entry'::text;
   exception when others then r := r || 'PASS  a client cannot forge an audit entry'::text; end;
-
-  -- withdrawal is the client path, and it leaves the row behind
-  update feature_values set withdrawn_at=now()
-   where feature_id=fid and field='BH07' and source='REVIEWED';
-  get diagnostics hit = row_count;
-  select bh07, bh07_source into n, s from feature_resolved where feature_id=fid;
-  select count(*), min(withdrawn_by::text)::uuid into cnt, got from feature_values
-   where feature_id=fid and field='BH07' and source='REVIEWED';
-  r := r || format('%s  withdrawal falls back to DERIVED and keeps the row: %s marked, now %s from %s, row kept by ...%s',
-        case when hit=1 and n=0.231 and s='DERIVED' and cnt=1 and got=uid then 'PASS' else 'FAIL' end,
-        hit, n, s, right(coalesce(got::text,'-'),12));
-
-  begin
-    update feature_values set withdrawn_at=now()
-     where feature_id=fid and field='BH06' and source='DERIVED';
-    r := r || 'FAIL  a DERIVED row could be withdrawn'::text;
-  exception when check_violation then
-    r := r || 'PASS  only a REVIEWED row can be withdrawn'::text; end;
-
   execute 'reset role';
 
   -- ------------------------------------------------------------ provenance --
   select count(*) into cnt from review_history where feature_id=fid and actor=uid;
-  r := r || format('%s  every audited client write is attributed to the account: %s rows',
-        case when cnt>=5 then 'PASS' else 'FAIL' end, cnt);
-
-  -- a reviewer with no display name set must not leak an address into a public table
-  perform set_config('request.jwt.claims',
-    json_build_object('sub',uid2,'role','authenticated','email','jsmith@ncdot.gov')::text, true);
-  execute 'set local role authenticated';
-  update review set status='fixed' where feature_id=fid;
-  execute 'reset role';
-  select reviewer_name into t from review where feature_id=fid;
-  r := r || format('%s  no display name falls back to the local part, not the address: "%s"',
-        case when t='jsmith' then 'PASS' else 'FAIL' end, t);
+  r := r || format('%s  every proposal is attributed to the account that made it: %s rows',
+        case when cnt>=2 then 'PASS' else 'FAIL' end, cnt);
 
   select string_agg(distinct x, ', ') into t from (
     select after->>'reviewer_name' as x from review_history where after ? 'reviewer_name') q
@@ -549,7 +566,7 @@ begin
 
   select count(*) into cnt from information_schema.role_routine_grants
    where routine_name='trigger_ingest' and grantee='authenticated';
-  r := r || format('%s  a signed-in reviewer may still ask for a reload: %s grant',
+  r := r || format('%s  the reload button can still call it, and 0045 lets only an approver through: %s grant',
         case when cnt>0 then 'PASS' else 'FAIL' end, cnt);
 
   select count(*) into cnt from cron.job where jobname like 'ingest-%';

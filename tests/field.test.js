@@ -4,7 +4,8 @@ const {chromium}=require('playwright');const fs=require('fs');
 const sbmock=require('./fx/sbmock.js');
 const FX=JSON.parse(fs.readFileSync('tests/fx/features.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 /* the fixture's 590668 sits here; the phone is put 120 ft away from it */
@@ -53,7 +54,7 @@ const mk=async(b,opts={})=>{
 };
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p,proposals}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept(''));
   await p.goto('file://'+FILE);

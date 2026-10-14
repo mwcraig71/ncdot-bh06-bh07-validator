@@ -34,10 +34,11 @@ const mk=async(b,opts={})=>{
   });
   return {ctx,p,authCalls};
 };
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+'  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+'  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p,authCalls}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));

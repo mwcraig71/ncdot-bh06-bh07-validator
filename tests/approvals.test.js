@@ -20,7 +20,8 @@ const sbmock=require('./fx/sbmock.js');
 const FX=JSON.parse(fs.readFileSync('tests/fx/features.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 const F1='11111111-1111-1111-1111-111111111111';   /* 590819 H01, carried, I-85 NBL */
@@ -122,9 +123,11 @@ function handlers(queue,dir,state){
     is_approver:()=>state.approver,
     approve_proposal:a=>{ if(!state.approver) return {status:400,body:{message:'Only a designated approver can accept a proposal.'}};
                           state.calls.push(['approve',a.p_feature,a.p_field,a.p_reason]);
+                          (state.expected=state.expected||[]).push(['approve',a.p_feature,a.p_expected]);
                           drop(a.p_feature,a.p_field); return {approved:true}; },
     reject_proposal:a=>{ if(!a.p_reason) return {status:400,body:{message:'A rejection needs a reason.'}};
                          state.calls.push(['reject',a.p_feature,a.p_field,a.p_reason]);
+                         (state.expected=state.expected||[]).push(['reject',a.p_feature,a.p_expected]);
                          drop(a.p_feature,a.p_field); return {rejected:true}; },
     decide_feature_removal:a=>{ state.calls.push(['removal',a.p_feature,a.p_accept,a.p_reason]);
                                 drop(a.p_feature); return {removed:!!a.p_accept}; },
@@ -151,7 +154,7 @@ const openQueue=async(p,click)=>{
   await p.waitForTimeout(1600); };            /* let the verdicts finish */
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const errs=[];
 
   /* ---------------------------------------------------------------- signed out */
@@ -257,6 +260,13 @@ const openQueue=async(p,click)=>{
   ok('a rejection with a reason is sent with the reason',rej&&rej[3],'30.1 is the mile marker, not the LRS measure');
   ok('...and that row is gone too',
      await p.evaluate(f=>APPR.items.some(i=>i.feature_id===f),F1),false);
+
+  /* review S6: the server refuses if the proposal changed after the approver
+     saw it, so the page has to say what it saw */
+  ok('accepting sends the value the approver was shown',
+     JSON.stringify(state.expected.find(c=>c[0]==='approve')),JSON.stringify(['approve',F4,'8.774']));
+  ok('...and so does rejecting',
+     JSON.stringify(state.expected.find(c=>c[0]==='reject')),JSON.stringify(['reject',F1,'30.100']));
 
   console.log('\n5. A removal is decided on its own');
   dialog='the ramp is still there, it was realigned not removed';

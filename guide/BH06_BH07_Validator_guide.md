@@ -380,6 +380,7 @@ So passing validation does not mean the data is right. The QC group catches what
 | Non-inventory direction | Third digit 4, 6 or 9. HPMS generally carries only the inventory direction — the leading predictor of a BH06-3 failure. **2,289 statewide.** |
 | Non-system route (class 5) | Municipal or private. HPMS generally covers public roads only. **1,204 statewide.** |
 | BH06 not a carried route | The decoded route is not among the routes named in Feature Carried — often the road underneath, which BH06 must never be. **754 statewide.** |
+| BH06 is the road beneath | **Error.** The coded route crosses the deck at the angle the recorded skew predicts for a road passing *beneath*, not along it. Catches the road below coded as the road carried even when Feature Carried names no route number, which is when the row above stays silent. It passes every FHWA check, so nothing else finds it. Judged once a structure's features are measured (open it, or **Expand features**), and only where the deck has dimensions, a skew and an RD_ANGLE. On very heavily skewed decks a crossing and a parallel road look alike, so it stays quiet there rather than guess. |
 | County code mismatch | Last three digits disagree with the bridge's county. **47 statewide.** |
 | BH07 exactly 0.000 | Usually an unset default. Valid only at a county line. **191 statewide.** |
 | BH06 not an 11-digit ID | Clears FHWA's length rule but is not NCDOT's format, so it will fail the HPMS match. |
@@ -421,7 +422,10 @@ value is never mistaken for NCDOT's published data.
 This matters more than the deriving does. Run against Mecklenburg's 50 structures with no
 value, **43 of them need no BH06 at all** — they are railroad bridges carrying rail over a
 highway, plus signs and pipes. The tool checks the `ServiceOn` field: BH06 is reported only
-where a **highway** is carried on the structure (B.F.01 begins with H, B.F.02 = C).
+where a **highway** is carried on the structure (B.F.01 begins with H, B.F.02 = C). That means
+NBI codes 1, 4, 5, 6, 7 and 8 (highway, highway-railroad, highway-pedestrian, an overpass at an
+interchange, third and fourth level), or the same thing in words where the structures layer
+spells it out. A bridge carrying a highway at an interchange is a highway bridge.
 
 Handing a railroad bridge the milepoint of the interstate underneath it would be exactly the
 error BH06 exists to prevent, so it doesn't. Those come back marked **not required**, with the
@@ -798,6 +802,14 @@ beside a proposal is the bridge it is about.
 whom, and what was decided — the provenance of a public submittal is public. Accepting and
 rejecting need a designated approver account.
 
+**Signing in lets you propose, and nothing more.** Anyone can create an account, so an account
+on its own can submit a proposal and revise its own, but it cannot write a value, change or
+withdraw a feature, clear a finding, start a data reload, or replace somebody else's waiting
+proposal. Everything that changes what the checks read goes through an approver.
+
+**You accept what you saw.** If a proposal changes after you opened the queue, Accept and
+Reject refuse and ask you to reload, so a value can't be swapped in under your decision.
+
 ### The screen checks the proposal before you do
 
 Each feature's proposals are shown together, with the verdict underneath. Every proposal is run
@@ -1074,7 +1086,7 @@ job rather than by you:
 **Settings → Data** shows each one's vintage: the date the service itself reported, and when it
 was last loaded. Cite those in a submittal rather than the date you ran the tool. If you know
 NCDOT has republished since the last load, **Reload from NCDOT now** asks the server to re-read;
-it takes a few minutes and needs you signed in, because it is recorded against your account.
+it takes a few minutes and needs an **approver** signed in, because it is recorded against your account and starts a statewide job.
 
 One vintage worth noticing: the structures service reports **2020**, while the bridge layer
 reports the current quarter. That gap is NCDOT's, not the tool's, and it is why condition

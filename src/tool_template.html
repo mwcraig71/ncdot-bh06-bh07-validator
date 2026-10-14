@@ -840,6 +840,8 @@ const RULES=[
   d:'The last three digits of BH06 do not match the bridge\u2019s county. Legitimate within a few hundred feet of a county line — otherwise a coding error.'},
  {id:'CONCURRENCY', grp:'qc', sev:'w', t:'BH06 not a carried route',
   d:'The route decoded from BH06 is not among the routes named in Feature Carried. Run Resolve carried to triage: either the carried route is right there and BH06 is wrong, or the coded route is there and the description is simply out of date after a redesignation. Ramp-carried bridges coded to a ramp route are excluded — those are correct.'},
+ {id:'BH06_CROSSES_DECK', grp:'qc', sev:'e', t:'BH06 is the road beneath',
+  d:'The coded BH06 route crosses the deck at the angle the recorded skew predicts for a road passing BENEATH the structure, not along it. That is the road below coded as the road carried. It passes every FHWA check — the route is real, in HPMS, and its milepoint lands on the bridge — which is why it needs its own test. Measured once the structure’s features are (open the bridge, or Expand features); only judged when the deck has dimensions, a skew and an RD_ANGLE.'},
  {id:'BAD_FORMAT', grp:'qc', sev:'w', t:'BH06 not an 11-digit ID',
   d:'Passes FHWA\u2019s length rule, but is not NCDOT\u2019s 11-digit format: class, qualifier, inventory, 5-digit number, 3-digit county. It will almost certainly fail the HPMS match.'},
  {id:'MP_ZERO', grp:'qc', sev:'w', t:'BH07 exactly 0.000',
@@ -1067,6 +1069,9 @@ function validate(b){
          mainline the ramp serves, not the ramp itself. Not a mismatch. */
       const rampOK = rid[0]==='8' && /RAMP|RMP|CONN|COL\b|LOOP/i.test(b.F_CARRIED||'');
       if(d&&toks.length&&!toks.includes(d.label)&&!rampOK) flags.push('CONCURRENCY');
+      /* CONCURRENCY only catches the road beneath when Feature Carried names a
+         route number. This catches it from the geometry, whatever the text says. */
+      if(b._codedUnder&&b._codedUnder.rid===rid) flags.push('BH06_CROSSES_DECK');
     }
   }
 
@@ -1503,11 +1508,23 @@ function buildWhere(){
 /* ==========================================================================
    RUN ALL CHECKS — one button, one pipeline
    ========================================================================== */
+/* Each step catches its own failure and says so in a toast, which the next step's
+   toast then replaces. So Run all collects them: a step that could not finish is
+   recorded here, and the closing message says the run is incomplete instead of
+   counting structures the missing check never looked at as clean. Null outside
+   Run all, so a step run on its own behaves exactly as before. */
+let RUNFAIL=null;
+function stepFailed(step,e){
+  const m=step+' ('+String((e&&e.message)||e||'no answer').slice(0,120)+')';
+  if(RUNFAIL&&!RUNFAIL.some(x=>x.startsWith(step+' ('))) RUNFAIL.push(m);   /* once per step */
+  return m;
+}
 async function runAll(){
   REFRAME=true;                    /* a new scope: frame it once */
-  await run();
+  if(!(await run())) return;       /* the bridge query failed: nothing to check */
   if(!ALL.length) return;
   const n=ALL.length;
+  RUNFAIL=[];
   try{
     await loadSNBI();
     if($('autohpms').checked) await fetchHPMS($('mode').value==='all' ? null : neededFips());
@@ -1527,9 +1544,17 @@ async function runAll(){
         await deriveMissing();
       }
     }
-  }catch(e){ busy(false); toast('A check did not finish: '+(e.message||e)+' — the rest of the results are still valid.',8000); }
+  }catch(e){ stepFailed('a check stopped the run',e); }
   busy(false);
+  const failed=RUNFAIL; RUNFAIL=null;
   const c={e:0,w:0,i:0,ok:0}; ALL.forEach(b=>c[b._esev||b._sev]++);
+  if(failed.length){
+    toast('Run INCOMPLETE on '+n.toLocaleString()+' structures. Did not finish: '+failed.join('; ')+'. '+
+      'Those checks were not applied, so a structure showing no finding is not clean — re-run, or '+
+      'run the failed check on its own once the service answers. So far: '+
+      c.e.toLocaleString()+' error, '+c.w.toLocaleString()+' warning.',20000);
+    return;
+  }
   toast('All checks complete on '+n.toLocaleString()+' structures — '+
     c.e.toLocaleString()+' error, '+c.w.toLocaleString()+' warning, '+c.ok.toLocaleString()+' clean. '+
     'Use the checklist to filter, then export.',11000);
@@ -1539,7 +1564,7 @@ async function run(){
   REFRAME=true;                    /* whatever else called us, this is a new scope */
   if(APPR.open) showApprovals(false);   /* results into a hidden table looks like nothing happened */
   let where;
-  try{ where=buildWhere(); }catch(e){ toast(e.message,4200); return; }
+  try{ where=buildWhere(); }catch(e){ toast(e.message,4200); return false; }
   busy(true,'Loading bridges','contacting NCDOT',4);
   try{
     ALL=await queryAll(BRIDGES,where,BFIELDS,n=>busy(true,'Loading bridges',n.toLocaleString()+' records',Math.min(92,n/230)));
@@ -1563,7 +1588,19 @@ async function run(){
     $('resolvenamed').disabled=ALL.length===0;
     $('csv').disabled=ALL.length===0;
     if(!ALL.length) toast('Nothing matched that query.',4000);
-  }catch(e){ busy(false); toast('Query failed: '+e.message,6000); }
+    return true;
+  }catch(e){
+    /* The previous scope's results must not stay on screen under the new
+       scope's name: clear them, so a failed query reads as a failed query. */
+    ALL=[]; SEL=null;
+    $('drawer').classList.remove('open'); routeLayer.clearLayers();
+    revalidate(); populateFilters(); activeChecks.clear(); applyFilters();
+    ['deep','locate','resolve','snbibtn','fillnull','expandfeat','traffic','resolvenamed','csv']
+      .forEach(id=>{ const n=$(id); if(n) n.disabled=true; });
+    busy(false);
+    toast('Query failed: '+e.message+' — no structures loaded. Nothing on screen is from an earlier run.',9000);
+    return false;
+  }
 }
 
 /* ---- deep check: true route extents, so we can catch impossible milepoints ---- */
@@ -1587,7 +1624,8 @@ async function deepCheck(){
       busy(true,'Deep check',Math.min(i+300,ids.length).toLocaleString()+' / '+ids.length.toLocaleString(),
            Math.min(i+300,ids.length)/ids.length*100);
     }
-  }catch(e){ busy(false); toast('Could not read route extents: '+e.message,7000); return; }
+  }catch(e){ busy(false); toast('Could not read route extents: '+e.message,7000);
+             stepFailed('Deep check, route extents',e); return; }
   DEEP=true; revalidate(); applyFilters(); busy(false);
   const nb=ALL.filter(b=>b._flags.includes('MP_BEYOND')||b._flags.includes('MP_BEFORE')).length;
   const missing=ids.length-got;
@@ -1759,6 +1797,7 @@ async function loadSNBI(){
   }catch(e){
     busy(false);
     toast('Could not read the SNBI inventory: '+e.message,8000);
+    stepFailed('SNBI inventory',e);
     return;
   }
   snbiJoin();
@@ -1825,7 +1864,7 @@ async function fetchHPMS(wanted){
       (ALL.length?': '+miss.toLocaleString()+' structure'+(miss===1?'':'s')+
        ' reference a route that is not in HPMS.':'.'),9000);
   }catch(e){ busy(false); toast('Could not read HPMS: '+e.message+
-    ' — you can still load a route list from file.',8000); }
+    ' — you can still load a route list from file.',8000); stepFailed('HPMS (BH06-3)',e); }
 }
 
 /* ==========================================================================
@@ -2170,7 +2209,7 @@ async function resolveCarried(){
       if(mp===null){ b._fix={verdict:'neither',rid:null,mp:null,cands:cand.size}; none++; continue; }
       b._fix={verdict:'fix',rid,mp,offset,alts:hits.length,cands:cand.size,codedPresent};
       solved++;
-    }catch(e){ none++; }
+    }catch(e){ none++; stepFailed('Resolve carried',e); }
     if(i%10===0) busy(true,'Resolving carried route',(i+1)+' / '+targets.length+' — '+solved+' resolved',
       (i+1)/targets.length*100);
   }
@@ -2196,10 +2235,18 @@ const NON_NBI=['Sign','Pipe','Other'];
 /* Is the feature CARRIED ON this structure a highway? BH06 only applies where it
    is (B.F.01 begins H, B.F.02 = C). A railroad or pedestrian bridge over a road
    carries no highway, so the road below must never become its BH06. */
+/* The same rule as carries_highway() in migration 0022: NBI service-on codes
+   1, 4, 5, 6, 7, 8 (highway, highway-railroad, highway-pedestrian, overpass at
+   an interchange, third and fourth level), or the decoded label that the
+   structures layer publishes instead of the code. */
+function servesHighway(v){
+  const t=String(v==null?'':v).trim();
+  return ['1','4','5','6','7','8'].includes(t)||/^(highway|overpass|third level|fourth level)/i.test(t);
+}
 function carriedIsHighway(b){
   const s=b._snbi;
-  if(s&&s.ServiceOn) return /highway/i.test(s.ServiceOn);
-  if(b.SERVICEON!=null&&b.SERVICEON!=='') return String(b.SERVICEON).trim()==='1';
+  if(s&&s.service_on!=null&&String(s.service_on).trim()!=='') return servesHighway(s.service_on);
+  if(b.SERVICEON!=null&&b.SERVICEON!=='') return servesHighway(b.SERVICEON);
   const fc=(b.F_CARRIED||'');
   if(/RAILROAD|RAILRD|\bRR\b|RAIL\b|CSX|NORFOLK|SOUTHERN R|PEDESTRIAN|GREENWAY|TRAIL|SIGN|PIPE|CONVEYOR|UTILITY/i.test(fc)) return false;
   return true;
@@ -2330,7 +2377,7 @@ async function deriveMissing(){
       r.note = r.note ? (r.note.includes('Derived from NCDOT road network')? r.note : r.note+'\n'+line) : line;
       r.by=reviewerName()||r.by||''; r.ts=Date.now();
       REVDIRTY=true; $('revdot').style.display='inline-block';
-    }catch(e){ b._derived={verdict:'none'}; none++; }
+    }catch(e){ b._derived={verdict:'none'}; none++; stepFailed('Fill missing',e); }
     if(i%5===0) busy(true,'Deriving missing values',(i+1)+' / '+targets.length+' — '+
       (high+low)+' derived',(i+1)/targets.length*100);
   }
@@ -2588,7 +2635,12 @@ async function loadTraffic(rids,onProgress){
         '&route_id=in.'+sbIn(chunk));
       rows.forEach(r=>{ if(!PROBE.has(r.route_id)) PROBE.set(r.route_id,[]);
                         PROBE.get(r.route_id).push(r); });
-    }catch(e){ /* the probe table may not be loaded yet; counted data still stands */ }
+    }catch(e){
+      /* Counted data still stands, but these routes were not answered: un-ask
+         them so the next open reads them again, and tell Run all. */
+      chunk.forEach(r=>TRAFFICASKED.delete(r));
+      stepFailed('Traffic estimates (probe)',e);
+    }
   }
   return got;
 }
@@ -2652,7 +2704,8 @@ async function trafficCheck(scope){
   busy(true,'Traffic','reading counts for '+rids.size.toLocaleString()+' routes',5);
   try{
     await loadTraffic([...rids],(d,n)=>busy(true,'Traffic',d.toLocaleString()+' / '+n.toLocaleString()+' routes',d/n*100));
-  }catch(e){ busy(false); toast('Traffic data could not be read: '+(e.message||e),7000); return; }
+  }catch(e){ busy(false); toast('Traffic data could not be read: '+(e.message||e),7000);
+             stepFailed('Traffic',e); return; }
   list.forEach(b=>{ featuresOf(b).forEach(f=>attachTraffic(b,f)); rollUpFeatures(b); });
   revalidate(); applyFilters(); busy(false);
 
@@ -2829,7 +2882,8 @@ async function detourCheck(scope,quiet){
   try{
     await loadDetour(list.map(b=>b.BRDG_NBR),quiet?null:
       (d,n)=>busy(true,'Detour length',d.toLocaleString()+' / '+n.toLocaleString()+' structures',d/n*100));
-  }catch(e){ if(!quiet){ busy(false); toast('Detour lengths could not be read: '+(e.message||e),7000); } return; }
+  }catch(e){ stepFailed('Detour lengths',e);
+             if(!quiet){ busy(false); toast('Detour lengths could not be read: '+(e.message||e),7000); } return; }
   revalidate(); applyFilters(); if(!quiet) busy(false);
   if(quiet) return;
   const m=list.filter(b=>{const d=detourOf(b); return d&&d.bypass;});
@@ -3141,6 +3195,20 @@ async function expandOne(b,tally){
       });
       const own=effRid(b);
       const ctx=deckContext(b,(cand.get(own)||{}).paths||[]);
+      /* The coded route gets the same carried-or-beneath question as every other
+         road here. Only asked when the deck is oriented by RD_ANGLE: oriented on
+         the coded route's own geometry it would always read as parallel. */
+      b._codedUnder=null;
+      if(cand.has(own)&&ctx.have&&ctx.angFrom==='RD_ANGLE'){
+        const cl=classifyCandidate(b,own,cand.get(own).paths,ctx);
+        /* At a heavy skew the predicted crossing angle comes within SKEW_TOL of
+           parallel, and a correctly coded carried route would read as "under".
+           An error needs the route to cross clearly: further from parallel than
+           the tolerance, and nearer the predicted crossing than to parallel. On
+           those heavily skewed decks the geometry cannot tell, so it stays quiet. */
+        if(cl.verdict==='under'&&cl.angle>SKEW_TOL&&Math.abs(cl.angle-cl.expected)<cl.angle)
+          b._codedUnder={rid:own, angle:cl.angle, expected:cl.expected, why:cl.why};
+      }
       const list=baseFeatures(b);
       let ord=list.length;
       cand.forEach((v,rid)=>{
@@ -3182,6 +3250,7 @@ async function expandOne(b,tally){
       b._feat=renumberFeatures(list);
       b._featDone=true;
       rollUpFeatures(b);
+      validate(b);   /* so BH06_CROSSES_DECK lands on the row now, not at the next re-run */
     }
   }
   return t;
@@ -3445,7 +3514,7 @@ async function locateCheck(){
           b._off=Math.hypot(pt[0]-sp.x, pt[1]-sp.y);
         });
       });
-    }catch(e){ fail++; }
+    }catch(e){ fail++; stepFailed('Locate, a request to the road network',e); }
     done+=chunk.length;
     busy(true,'Locate check',done.toLocaleString()+' / '+routes.length.toLocaleString()+' routes',done/routes.length*100);
   }
@@ -4803,8 +4872,7 @@ async function updateCacheState(){
    version of what the old button pretended to do. */
 async function refreshCache(){
   if(!signedIn()){
-    toast('Reloading reference data is recorded against an account, so it needs you signed in. '+
-          'Settings → Reviewer.',7000);
+    toast('Reloading reference data needs an approver signed in. Settings → Reviewer.',7000);
     return;
   }
   if(!confirm('Ask the server to re-read NCDOT and FHWA now?\n\n'+
@@ -4819,6 +4887,7 @@ async function refreshCache(){
                  'Content-Type':'application/json'},
         body:JSON.stringify({p_source:src})});
       if(!r.ok){ const t=await r.text();
+        if(t.includes('Only an approver')) throw new Error('only an approver can reload reference data');
         throw new Error(src+': '+(t.includes('already running')?'an ingest is already running':t.slice(0,160))); }
     }
     busy(false);
@@ -5319,9 +5388,13 @@ async function verifyFeature(g,f){
 async function decideValue(fid,field,accept,reason){
   if(!accept&&!String(reason||'').trim()){
     toast('A rejection needs a reason. The inspector who submitted it has to be able to read why.',6000); return false; }
+  /* send the value on screen: the server refuses if the proposal has changed
+     since the queue was loaded, so nobody approves a value they never saw */
+  const seen=(APPR.items||[]).find(r=>r.kind==='value'&&r.feature_id===fid&&r.field===field);
   try{
     await sbRpc(accept?'approve_proposal':'reject_proposal',
-      {p_feature:fid, p_field:field, p_reason:reason||null});
+      {p_feature:fid, p_field:field, p_reason:reason||null,
+       p_expected:seen&&seen.proposed_value!=null?String(seen.proposed_value):null});
     return true;
   }catch(e){ toast(String(e.message||e),9000); return false; }
 }

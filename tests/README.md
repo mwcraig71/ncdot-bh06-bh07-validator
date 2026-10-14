@@ -21,6 +21,14 @@ node tests/detour.test.js      dist/NCDOT_BH06_BH07_Validator.html
 Each takes a build as its argument and should pass on all three: `dist/`, the
 artifact build, and `docs/index.html`.
 
+Each suite prints `N passed, M failed` last and **exits 1 if anything failed**, or if it
+stopped before making any assertion (`_check.js`). Before October 2026 a FAIL printed and the
+suite still exited 0, so check the exit code, not just the output.
+
+The suites look for Chromium at `/opt/pw-browsers/chromium`, where they were written. Anywhere
+else, set `PW_CHROMIUM` to a Chromium executable, or leave it unset and run
+`npx playwright install chromium` once so Playwright uses its own.
+
 ---
 
 `data.test.js` — **36 assertions**, the reference-data layer. It replaces the
@@ -214,8 +222,8 @@ because the things worth asserting are exactly whether the client scopes its rea
 and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
-corrections, **37** auth, **87** features, **21** columns, **66** field,
-**49** approvals, **60** traffic, **88** detour — 497 in all.
+corrections, **37** auth, **106** features, **21** columns, **66** field,
+**51** approvals, **60** traffic, **88** detour — 518 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

@@ -11,7 +11,8 @@ const sbmock=require('./fx/sbmock.js');
 const bridges=JSON.parse(fs.readFileSync('tests/fx/bridges.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
 
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 /* Requests that should no longer leave the browser at all. */
@@ -61,7 +62,7 @@ const boot=async(p)=>{
 };
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p,sb,esri}=await mk(b,{bigCounty:2500});
   const errs=[]; p.on('pageerror',e=>errs.push(e.message));
   p.on('dialog',d=>d.accept(''));

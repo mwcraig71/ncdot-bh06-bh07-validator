@@ -16,7 +16,8 @@ const {chromium}=require('playwright');const fs=require('fs');
 const sbmock=require('./fx/sbmock.js');
 const FX=JSON.parse(fs.readFileSync('tests/fx/features.json','utf8'));
 const FILE=require('path').resolve(process.argv[2]||'dist/NCDOT_BH06_BH07_Validator.html');
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+
   '  got '+JSON.stringify(g)+', expected '+JSON.stringify(w));
 
 const I85='10000085060';      /* 590819 carries this at MP 2.672 */
@@ -98,7 +99,7 @@ const boot=async p=>{
 };
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
   const {p,m}=await mk(b);
   const errs=[]; p.on('pageerror',e=>errs.push(e.message)); p.on('dialog',d=>d.accept(''));
   await boot(p);

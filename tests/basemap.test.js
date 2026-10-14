@@ -32,10 +32,11 @@ const mk=async(b,blocked)=>{
   return {p,seen};
 };
 
-const ok=(l,g,w)=>console.log((String(g)===String(w)?'  PASS  ':'  FAIL  ')+l+'  got '+g+', expected '+w);
+const {tally,CHROMIUM}=require('./_check');
+const ok=(l,g,w)=>console.log((tally(String(g)===String(w))?'  PASS  ':'  FAIL  ')+l+'  got '+g+', expected '+w);
 
 (async()=>{
-  const b=await chromium.launch({executablePath:'/opt/pw-browsers/chromium'});
+  const b=await chromium.launch({executablePath:CHROMIUM});
 
   console.log('\nFILE: '+FILE.split('/').pop());
 
