@@ -207,6 +207,15 @@ drawing an empty state, and raises no finding on missing data.
 
 It also pins the route behind each detour (migration 0046): opening a bridge reads its route, one bridge at a time, and draws the detour in orange, the normal route dashed grey, the measuring points as A and B and the closed point in red; the panel lists the detour road by road with a total equal to the detour, links to the same path in Google Maps, and "Show on the map" fits the map to it. Opening another bridge clears it, a dead end draws nothing, a route not on file says so, and a failed route read leaves the distances standing.
 
+And it pins the Figure 102 figure (migration 0048). Where the turn points are on file, the
+headline is the turn-point figure, not the bridge-end one, says how it was measured and what the
+bridge ends would give; the panel spells out the subtraction to three decimals and lists the
+detour and the normal route between the turn points road by road; A and B sit on the turn points
+and the orange and grey lines are the routes between them; Google Maps goes from A to B. A loop
+road keeps its bridge-end figure and says only local traffic uses the bridge; a figure with no
+basis on file reads as the bridge-end figure it is; and the CSV carries the figure, its basis and
+the bridge-end figure beside it.
+
 It also pins three fixes from the 13 October review. The panel never calls the
 trip between the measuring points "straight across": on a divided highway those
 points sit out where a driver can leave, so that trip can be a mile or more, and
@@ -225,7 +234,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **106** features, **21** columns, **66** field,
-**51** approvals, **60** traffic, **107** detour — 537 in all.
+**51** approvals, **60** traffic, **128** detour — 558 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

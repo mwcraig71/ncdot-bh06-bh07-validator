@@ -10,7 +10,12 @@
 
    B.H.17 is read in MILES. Measured against 15,385 bridges, culverts and
    pipes, the miles reading is the closer one on 89% of them, and from code 10
-   upward the median measured/coded ratio is 1.03.
+   upward the median measured/coded ratio is 1.03 (against the bridge-end
+   measurement).
+
+   The figure reported is FHWA SNBI Figure 102's (migration 0048): the detour
+   between where it turns off the road and where it turns back on, less the
+   normal route between them. Section 7f pins it.
 
    Every endpoint is mocked. */
 const {chromium}=require('playwright');const fs=require('fs');
@@ -41,8 +46,11 @@ const DETOUR=()=>[
    around_mi:null,direct_mi:null,additional_mi:null,probe_mi:null,
    reason:'no way around within 8 mi',width_assumed:false,deck_inferred:false,graph_vintage:V},
   /* coded 99, "no detour" — but there is a way around */
+  /* ...measured from its turn points (Figure 102, migration 0048): 3.4 mi, against
+     4.2 mi from the bridge ends */
   {brdg_nbr:'590207',mode:'bypass',seq:0,road:'I 77',heading:10,verdict:'ok',
    around_mi:4.4,direct_mi:0.2,additional_mi:4.2,probe_mi:0.05,reason:null,
+   report_mi:3.4,report_basis:'turn_points',
    width_assumed:false,deck_inferred:false,graph_vintage:V},
   {brdg_nbr:'590207',mode:'collapse',seq:0,road:null,heading:null,verdict:'none_beneath',
    around_mi:null,direct_mi:null,additional_mi:null,probe_mi:null,
@@ -55,8 +63,10 @@ const DETOUR=()=>[
    width_assumed:false,deck_inferred:true,graph_vintage:V},
   /* coded 0, "bypass at the site" — but closing it costs 3 miles; and the road
      beneath could not be measured, which must say why rather than show a number */
+  /* ...on a loop road, so it keeps its bridge-end figure and says why */
   {brdg_nbr:'590668',mode:'bypass',seq:0,road:'NC 51',heading:170,verdict:'ok',
    around_mi:3.3,direct_mi:0.2,additional_mi:3.1,probe_mi:0.1,reason:null,
+   report_mi:3.1,report_basis:'bridge_ends_local',
    width_assumed:true,deck_inferred:false,graph_vintage:V},
   {brdg_nbr:'590668',mode:'collapse',seq:0,road:'US 74',heading:80,verdict:'unmeasured',
    around_mi:null,direct_mi:null,additional_mi:null,probe_mi:null,
@@ -71,6 +81,8 @@ const enc=pts=>{let o='',pl=0,pn=0;for(const [la,lo] of pts){const a=Math.round(
   o+=String.fromCharCode(v+63);} pl=a;pn=b;} return o;};
 const RA=[35.2400,-80.9600], RB=[35.2420,-80.9580];
 const CLOSED_PTS=[RA,[35.2380,-80.9550],[35.2390,-80.9480],[35.2440,-80.9500],RB];
+const TA=[35.2370,-80.9630], TB=[35.2450,-80.9550];
+const TURN_PTS=[TA,[35.2300,-80.9600],[35.2380,-80.9550],[35.2440,-80.9500],TB];
 const DROUTE=()=>[
   {brdg_nbr:'590819',mode:'bypass',seq:0,a:RA,b:RB,block:[[35.2410,-80.9590]],open_mi:0.14,around_mi:2.0,
    open_path:enc([RA,RB]),closed_path:enc(CLOSED_PTS),
@@ -80,6 +92,14 @@ const DROUTE=()=>[
    open_mi:1.8,around_mi:3.1,open_path:enc([[35.2300,-80.9700],[35.2500,-80.9500]]),
    closed_path:enc([[35.2300,-80.9700],[35.2200,-80.9600],[35.2500,-80.9500]]),
    open_steps:[{n:'I 485 Inner',mi:1.8}],closed_steps:[{n:'I 485 Inner',mi:0.9},{n:'Wilkinson Boulevard / US 29',mi:2.2}]},
+  /* 590207: the bridge-end route, and the turn points measured on it */
+  {brdg_nbr:'590207',mode:'bypass',seq:0,a:RA,b:RB,block:[[35.2410,-80.9590]],open_mi:0.2,around_mi:4.4,
+   open_path:enc([RA,RB]),closed_path:enc([RA,[35.2300,-80.9600],[35.2380,-80.9550],[35.2440,-80.9500],RB]),
+   open_steps:[{n:'I 77',mi:0.2}],closed_steps:[{n:'I 77',mi:0.4},{n:'Exit Road',mi:3.6},{n:'I 77',mi:0.4}],
+   ja:TA,jb:TB,turn_detour_mi:4.1,turn_original_mi:0.7,
+   turn_detour_path:enc(TURN_PTS),turn_original_path:enc([TA,RA,RB,TB]),
+   turn_detour_steps:[{n:'Exit Road',mi:3.6},{n:'Side Street',mi:0.5}],
+   turn_original_steps:[{n:'I 77',mi:0.7}]},
 ];
 
 let PINRID=I85, PINMP=2.672;
@@ -423,14 +443,19 @@ const fields=l=>{const out=[];let cur='',q=false;
   ok('...with a key saying which detour it is and its extra miles',
      await p.evaluate(()=>/Detour · bridge 590819 · bridge closed: 1\.9 mi extra/.test(document.querySelector('.dt-key').innerText)),true);
   const tb=await p.evaluate(()=>{const d=document.querySelector('#dr-body details.drt'); if(!d) return null; d.open=true;
-    return {rows:[...d.querySelectorAll('tbody tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()),
-            tot:d.querySelector('tfoot').innerText.replace(/\s+/g,' ').trim(), note:d.querySelector('.drt-note').innerText};});
+    const t=d.querySelectorAll('table.drtab');
+    return {rows:[...t[0].querySelectorAll('tbody tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()),
+            tot:t[0].querySelector('tfoot').innerText.replace(/\s+/g,' ').trim(),
+            normal:[...t[1].querySelectorAll('tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()).join(' | '),
+            math:document.querySelector('#dr-body .drt-math').innerText.replace(/\s+/g,' ').trim()};});
   console.log('   '+JSON.stringify(tb));
   ok('the panel lists the detour road by road, in order, with the distance on each',
      tb&&tb.rows.join(' | '),'I 85 North 0.30 | (ramp) 0.25 | Little Rock Road 1.10 | (ramp) 0.20 | I 85 North 0.15');
   ok('...totalled, and the total is the detour',tb&&tb.tot,'Total with it closed 2.00');
-  ok('...with the normal route and the difference, which is the extra',
-     !!tb&&/Normally: I 85 North 0\.14 mi — 0\.14 mi\. The difference, 1\.86 mi, is the extra/.test(tb.note),true);
+  ok('...with the normal route between the same points listed the same way',
+     tb&&tb.normal,'Road, in order mi | I 85 North 0.14 | Normal route, A to B 0.14');
+  ok('the subtraction is spelled out, exactly, from the bridge ends where no turn points are on file',
+     tb&&tb.math,'Detour 2.000 − normal route 0.140 = 1.860 mi extra, from A to B at the bridge ends');
   ok('each road beneath gets its own table',
      await p.evaluate(()=>document.querySelectorAll('#dr-body details.drt').length),2);
   const gm=await p.evaluate(()=>[...document.querySelectorAll('#dr-body .drt-acts a')].find(a=>/Google/.test(a.textContent)).href);
@@ -457,6 +482,59 @@ const fields=l=>{const out=[];let cur='',q=false;
   ok('a measured detour whose route is not on file says so, rather than drawing anything',
      await p.evaluate(async()=>{ select('590668',true); await new Promise(r=>setTimeout(r,500));
        return /route for this measurement is not on file/.test(document.getElementById('dr-body').innerText)&&!DSHOWN; }),true);
+
+  console.log('\n7f. Figure 102: measured from where the detour turns off the road to where it turns back on');
+  ok('the reported figure and how it was measured are read with the rest',
+     m.reads('detour_measured').every(r=>/report_mi/.test(r.url)&&/report_basis/.test(r.url)),true);
+  ok('...and the turn points with the route',
+     m.reads('detour_route').every(r=>/ja,jb,turn_detour_mi,turn_original_mi/.test(r.url)),true);
+  await p.evaluate(()=>select('590207',true));
+  await p.waitForFunction(()=>DROUTE.has('590207')&&!!DSHOWN&&DSHOWN.bn==='590207',null,{timeout:15000});
+  await p.waitForTimeout(300);
+  const f=await p.evaluate(()=>{const d=document.querySelector('#dr-body details.drt'); d.open=true;
+    const t=d.querySelectorAll('table.drtab');
+    return {txt:document.getElementById('dr-body').innerText,
+      math:document.querySelector('#dr-body .drt-math').innerText.replace(/\s+/g,' ').trim(),
+      det:[...t[0].querySelectorAll('tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()).join(' | '),
+      nor:[...t[1].querySelectorAll('tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()).join(' | ')};});
+  ok('the headline is the turn-point figure, not the bridge-end one',/Calculated detour length\s*3\.4 mi extra with it closed/i.test(f.txt),true);
+  ok('...and it says how it was measured, and what the bridge ends would give',
+     /Measured from where the detour turns off the road to where it turns back on, less the normal route between those two points \(FHWA SNBI Figure 102\)\. From the bridge ends it would be 4\.2 mi\./.test(f.txt),true);
+  ok('the subtraction, to three decimals, so it can be checked exactly',
+     f.math,'Detour 4.100 − normal route 0.700 = 3.400 mi extra, from turn-off A to turn back on B');
+  ok('the detour between the turn points, road by road',f.det,'Road, in order mi | Exit Road 3.60 | Side Street 0.50 | Detour, A to B 4.10');
+  ok('...and the normal route between the same two points',f.nor,'Road, in order mi | I 77 0.70 | Normal route, A to B 0.70');
+  const lay2=await p.evaluate(()=>{ const o={ab:[],orange:null,grey:null,tips:[]};
+    detourLayer.eachLayer(l=>{ if(l instanceof L.Polyline){ if(l.options.color==='#E8590C') o.orange=l.getLatLngs().map(x=>[x.lat,x.lng]);
+        if(l.options.dashArray) o.grey=l.getLatLngs().length; }
+      else if(l instanceof L.Marker&&!(l instanceof L.CircleMarker)){ const ll=l.getLatLng(); o.ab.push([ll.lat,ll.lng]);
+        o.tips.push(l.getTooltip()&&l.getTooltip().getContent()); } });
+    o.key=document.querySelector('.dt-key').innerText.replace(/\s+/g,' '); return o; });
+  ok('A and B sit on the turn points, not the bridge ends',JSON.stringify(lay2.ab),JSON.stringify([TA,TB]));
+  ok('...and say what they are',lay2.tips.join(' | '),'A: the detour turns off the road here | B: the detour turns back on here');
+  ok('the orange line is the detour between the turn points',JSON.stringify(lay2.orange),JSON.stringify(TURN_PTS));
+  ok('...and the grey one the normal route between them, across the bridge',lay2.grey,4);
+  ok('the key gives the two lengths the figure is the difference of',
+     /3\.4 mi extra/.test(lay2.key)&&/detour 4\.10 mi/.test(lay2.key)&&/normal 0\.70 mi/.test(lay2.key),true);
+  ok('"Check in Google Maps" goes from turn-off A to turn back on B',
+     await p.evaluate(()=>[...document.querySelectorAll('#dr-body .drt-acts a')].find(a=>/Google/.test(a.textContent)).href)
+       .then(h=>/origin=35\.23700,-80\.96300&destination=35\.24500,-80\.95500/.test(h)),true);
+  const t668b=await p.evaluate(()=>{select('590668',true); return document.getElementById('dr-body').innerText;});
+  ok('a loop road keeps its bridge-end figure, and says only local traffic uses the bridge',
+     /3\.1 mi extra with it closed[\s\S]{0,20}Only local traffic uses this bridge: between where the detour leaves the road and where it rejoins it there is a shorter way that does not cross it \(a loop road\)\./.test(t668b),true);
+  ok('a figure with no basis on file (loaded before 0048) is the bridge-end one, said in plain words',
+     /1\.9 mi extra with it closed\s*Normally 0\.1 mi from one end of the bridge to the other/.test(t819),true);
+  const csv2=await p.evaluate(()=>{let cap=null; const old=URL.createObjectURL;
+    URL.createObjectURL=b=>{cap=b; return 'blob:x';}; exportCSV(); URL.createObjectURL=old; return cap?cap.text():'';});
+  const c2=fields(csv2.split('\n')[0]), r2=csv2.split('\n').slice(1).filter(Boolean).map(fields);
+  const at2=(bn,c)=>r2.find(r=>r[0]===bn)[c2.indexOf(c)];
+  ok('CSV: the reported figure, its basis, and the bridge-end figure beside it',
+     ['DETOUR_EXTRA_MI','DETOUR_BASIS','DETOUR_EXTRA_BRIDGE_ENDS_MI'].map(c=>at2('590207',c)).join(' / '),
+     '3.400 / TURN POINTS (FIG 102) / 4.200');
+  ok('...a loop road is labelled as one',at2('590668','DETOUR_BASIS'),'BRIDGE ENDS: LOCAL TRAFFIC ONLY');
+  ok('...a figure with no basis on file is labelled bridge ends',at2('590819','DETOUR_BASIS'),'BRIDGE ENDS');
+  ok('...a dead end leaves both blank',[at2('590213','DETOUR_BASIS'),at2('590213','DETOUR_EXTRA_BRIDGE_ENDS_MI')].join('|'),'|');
+  ok('...and the header and rows still line up',r2.every(r=>r.length===c2.length),true);
 
   console.log('\n8. A failed read is reported, not drawn as "no detour anywhere"');
   const {p:p2,m:m2}=await mk(b,{fail:'detour_measured'});

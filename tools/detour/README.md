@@ -137,3 +137,87 @@ rounded to 6 decimals, which moved the snap) kept their verified routes, with mi
 
 Migration 0047 then closes `ingest_detour_route` and the table's write grants,
 since nothing writes to it until the next run.
+
+## From the turn points: FHWA SNBI Figure 102 (15 October 2026)
+
+The statewide run measured between two points at the bridge ends. A driver there has to
+double back to the nearest turn-off, and that doubling back was counted as detour. Figure 102
+measures between the point where traffic turns off the road and the point where it turns back
+on: the detour between them, less the normal route between the same two points. In the
+figure's example, 2 + 6 + 2 = 10 mi against 6 mi on the original road is a 4-mile detour.
+
+`fig102.py` finds the turn points on each stored closed route, from Valhalla's own manoeuvres:
+A is where it first leaves the road the bridge carries (named at the closed point on the open
+route), B where it last comes back on. If the route leaves and rejoins more than once (it turns
+around, then exits further on), each later turn-off / earlier turn-back-on pair is tried too and
+the least extra kept, provided the normal route between the pair still crosses the bridge. The
+normal route is routed between the two points; where routing from a turn point cannot be trusted
+(it snaps onto the cross road, or a one-way stretch), `along_road()` measures it along the road
+instead.
+
+Where neither works, the bridge-end figure is kept and says why:
+
+| Basis | Detours | Share |
+|---|---|---|
+| `turn_points` | 19,795 | 80.8% |
+| `turn_points_along_road` | 1,164 | 4.7% |
+| `bridge_ends_local`: a shorter way between the turn points skips the bridge (a loop road), so only local traffic uses it | 1,962 | 8.0% |
+| `bridge_ends`: no turn points fixed; often the route never doubles back, so the figure already is Figure 102 | 1,591 | 6.5% |
+
+Median detour, from the bridge ends → from the turn points:
+
+- Road on the bridge (18,072): 3.97 → 1.77 mi.
+- Road beneath (6,440): 1.56 → 0.99 mi.
+
+Against NCDOT's code, road on the bridge, read as miles:
+
+| code | n | median ÷ code (turn points) | within ±50% | median ÷ code (bridge ends) |
+|---|---|---|---|---|
+| 1 | 6,426 | 1.09 | 42% | 2.34 |
+| 2 | 2,915 | 0.94 | 61% | 1.90 |
+| 3–5 | 4,253 | 0.73 | 59% | 1.34 |
+| 6–9 | 1,680 | 0.54 | 51% | 1.07 |
+| 10–19 | 710 | 0.52 | 50% | 1.03 |
+| 20–98 | 327 | 0.50 | 48% | 1.03 |
+
+Short codes now agree; long codes match the bridge-end measurement, and run about twice the
+turn-point one. 140004 (US 17, code 27) is typical. From the bridge ends it is 25.8 mi, because a
+driver doubles back 11 mi along US 17 before turning off. From the turn points it is 17.7 mi round
+by NC 343 against 12.5 mi on US 17, so 5.2 mi. NCDOT appears to code long detours from the bridge.
+
+The figures were spot-checked on 290 bridges against bridges the owner knows, including 590141
+(1.03; NCDOT 1) and 210049 (loop road, kept at 7.1; NCDOT 7).
+
+Run, then export:
+
+```
+cd <run dir>; for w in 0 1; do python3 fig102.py <repo>/data/detour_routes $w 2 <out> & done; wait
+python3 tools/detour/export_turns.py data/detour_turns <out>
+```
+
+Loading (migration 0048 adds the columns), per file NN, as the database owner:
+
+```sql
+select net.http_get(url := 'https://raw.githubusercontent.com/mwcraig71/ncdot-bh06-bh07-validator/<commit>/data/detour_turns/turns_NN.json',
+                    timeout_milliseconds := 60000);
+-- once net._http_response has status 200 for that id:
+with x as (
+  select * from jsonb_to_recordset((select content::jsonb from net._http_response where id = <request id>))
+    as x(brdg_nbr text, mode text, seq smallint, how text, ja jsonb, jb jsonb, detour_mi numeric,
+         original_mi numeric, detour_path text, original_path text, detour_steps jsonb, original_steps jsonb)),
+r as (
+  update detour_route d
+     set ja = x.ja, jb = x.jb, turn_detour_mi = x.detour_mi, turn_original_mi = x.original_mi,
+         turn_detour_path = x.detour_path, turn_original_path = x.original_path,
+         turn_detour_steps = x.detour_steps, turn_original_steps = x.original_steps
+    from x where d.brdg_nbr = x.brdg_nbr and d.mode = x.mode and d.seq = x.seq
+  returning 1)
+update detour_measured m
+   set report_basis = x.how,
+       report_mi = case when x.how like 'turn_points%' then greatest(0, x.detour_mi - x.original_mi)
+                        else m.additional_mi end
+  from x where m.brdg_nbr = x.brdg_nbr and m.mode = x.mode and m.seq = x.seq;
+```
+
+`report_mi` is computed from the two stored three-decimal figures, so the subtraction the panel
+shows is exact.

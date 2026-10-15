@@ -730,26 +730,62 @@ OpenStreetMap extract of 12 October 2026:
 Minimum distance only. Nothing on the way around is checked for clearance, posting or width. That
 is a separate question, B.H.12 to B.H.16.
 
+### From the turn points (FHWA SNBI Figure 102)
+
+The figure reported is the one FHWA's Figure 102 draws: the **detour from where it turns off the
+road to where it turns back on, less the normal route between those same two points**. In the
+figure's own example, the detour is 2 + 6 + 2 = 10 miles against 6 miles on the original road, so
+the detour length is 4 miles.
+
+The first statewide run measured from the two ends of the bridge instead. A driver standing at the
+end of a closed bridge has to double back to the nearest turn-off, and that doubling back was
+counted as detour, about two miles too much on a typical rural bridge. Measuring from the turn
+points removes it:
+
+| Detours, statewide | From the bridge ends | From the turn points |
+|---|---|---|
+| Road on the bridge, median | 3.97 mi | 1.77 mi |
+| Road beneath, median | 1.56 mi | 0.99 mi |
+
+The tool finds the turn points on the detour route itself: **A** is where it first leaves the road
+the bridge carries, and **B** is where it last comes back on. If the route turns off only to turn
+around and then leaves again further on, the later turn-off is tried too, and the shorter extra is
+kept, as long as the normal route between the two points still crosses the bridge.
+
+Two kinds of detour keep the bridge-end figure, and the panel says which:
+
+- **Only local traffic uses this bridge.** Between the turn points there is a shorter way that
+  does not cross the bridge: the bridge is on a loop road, like Pine Log Road (210049), which leaves
+  Old Hwy 64 and comes back to it. Through traffic never crosses it, and for the people who live
+  along the loop, the detour really is measured from the bridge ends: 7.1 mi there, which NCDOT
+  codes 7. This is about 8% of detours.
+- **No turn points could be fixed** on the route, about 6%. On many of these the detour never
+  doubles back, so the bridge-end figure is already the Figure 102 figure.
+
 ### Reading the code
 
 B.H.17 is in **miles**. Measured against 15,385 structures, reading the code as miles fits better
 than reading it as kilometres on 89% of them (95% for bridges alone; culverts are mostly short
 detours, where the two readings are close), and from code 10 upward the median measured-to-coded
-ratio is 1.03. Three codes are not distances: **0** means a bypass at the site, **99** is NCDOT's
+ratio is 1.03 (both against the bridge-end measurement). Three codes are not distances: **0** means a bypass at the site, **99** is NCDOT's
 no-detour code, and **199** appears once with no published meaning. The tool labels them as codes
 and never reads them as miles.
 
 ### What every answer can be
 
-- **A distance**: the extra miles the closure costs, with the trip it was measured on in plain words.
+- **A distance**: the extra miles the closure costs, and how it was measured.
 
-  On most roads the trip runs from one end of the bridge to the other: "Normally 0.1 mi from one end
-  of the bridge to the other; 2.0 mi with it closed." On a divided highway it cannot, because there
-  is no way off at the end of the bridge, so the trip starts and ends where a driver can leave and
-  rejoin. Bridge 590141, Billy Graham Parkway northbound over Sugar Creek, reads: "No way off the
-  road near the bridge, so the trip is measured from half a mile before it to half a mile past it:
-  normally 1.0 mi, 5.5 mi with the bridge closed." The 1.0 mi is the road between those two points,
-  not the bridge. The detour is the difference, 4.5 mi.
+  From the turn points, the panel reads, for example, "1.0 mi extra with it closed. Measured from
+  where the detour turns off the road to where it turns back on, less the normal route between
+  those two points (FHWA SNBI Figure 102). From the bridge ends it would be 4.5 mi." That is bridge
+  590141, Billy Graham Parkway northbound over Sugar Creek, which NCDOT codes 1. Under it the
+  subtraction is spelled out: "Detour 3.297 − normal route 2.264 = 1.033 mi extra, from turn-off A
+  to turn back on B."
+
+  Where the bridge-end figure is kept, the panel says why and gives the trip in plain words:
+  "Normally 0.1 mi from one end of the bridge to the other; 7.2 mi with it closed." On a divided
+  highway with no way off at the end of the bridge, the bridge-end points move out to where a driver
+  can leave, and the sentence says how far out.
 - **A way past at the site**: closing it costs next to nothing.
 - **No detour**: the far side is reachable only over this structure. This is an answer, not a
   failure, and it agrees with NCDOT's 99 on 64% of the structures coded 99.
@@ -771,8 +807,11 @@ so 30 ft was used.
 - **Coded "bypass at the site" (0), but the measured detour is long**: a warning, at more than 2
   miles.
 - **B.H.17 differs from the measured detour**: a note only, when the gap is both more than half and
-  more than 5 miles. It is commonest on code 1, which sits on 36% of structures and behaves like a
-  default: measured detours there run a median 2.3 times the code.
+  more than 5 miles. On code 1 the measurement now agrees with NCDOT to a median within 10%. The
+  gap is mostly on long codes: from 5 miles up, NCDOT's codes run a median of about twice the
+  Figure 102 measurement, and match the bridge-end measurement instead (median ratio 1.03). So a
+  long code may have been measured from the bridge rather than from the turn points. The panel
+  shows both figures.
 
 ### Where it shows
 
@@ -780,7 +819,9 @@ A **Detour length** section in the bridge panel, after the features: the code fi
 calculated detour length, then each road beneath by name. Two table columns, **BH17 coded** and **Detour
 measured**, both numeric for filtering and sorting: `>10` finds long detours, and `-` finds the
 ones with nothing measured. The CSV has `BH17_NCDOT_CODE`, `BH17_MEANING`, `DETOUR_MEASURED`,
-`DETOUR_EXTRA_MI`, `DETOUR_MEASURED_EACH_SIDE_MI` (how far out the two measuring points sit),
+`DETOUR_EXTRA_MI` (the Figure 102 figure), `DETOUR_BASIS` (turn points, or bridge ends and why),
+`DETOUR_EXTRA_BRIDGE_ENDS_MI` (the bridge-end figure), and for the bridge-end measurement
+`DETOUR_MEASURED_EACH_SIDE_MI` (how far out its two measuring points sit) and
 `DETOUR_ROUTE_OPEN_MI` and `DETOUR_ROUTE_CLOSED_MI` (the route between them each way),
 `DETOUR_NOTE`, `DETOUR_BENEATH` and `DETOUR_GRAPH`.
 A pin dropped on an open bridge's carried road shows that bridge's detour. Dropped on a road
@@ -794,20 +835,22 @@ its own. It is one read per 200 structures, so there is no switch for it.
 A distance alone can't be checked, so every measured detour also carries the route it was
 measured on. Open a bridge and its detour is drawn on the map:
 
-- **Orange:** the detour, with the bridge closed.
-- **Dashed grey:** the normal route between the same two points.
-- **A and B:** the two measuring points.
+- **Orange:** the detour, with the bridge closed, from turn-off A to turn back on B.
+- **Dashed grey:** the normal route between the same two points, across the bridge.
+- **A and B:** the turn points: A where the detour leaves the road, B where it comes back on.
+  Where the figure is from the bridge ends, A and B are the bridge-end measuring points.
 - **Red ring:** the point that was closed.
 
 A key in the corner names the bridge and the extra miles, and has **Fit to map** and **Hide**.
 
-In the panel, under each calculated detour, **The detour, road by road** lists the roads in
-order with the distance on each, totalled. The total is the detour. Beside it is the normal route,
-and the difference between the two is the extra the closure costs.
+In the panel, under each calculated detour, the subtraction is spelled out to three decimals:
+detour, minus the normal route, equals the extra. **The detour, road by road** then lists the roads
+of each route in order with the distance on each, totalled, so each number in the subtraction can
+be checked line by line.
 
 - **Show on the map** draws that particular detour and fits the map to it. Use it for a road
   beneath, or on a phone, where it also closes the panel so you can see the map.
-- **Check in Google Maps** opens the same path in Google Maps, from A to B through eight points
+- **Check in Google Maps** opens the same detour in Google Maps, from A to B through eight points
   along the detour. You can compare it against Google's map and Street View.
 
 Road names are OpenStreetMap's. A step with no name in the map shows as "(ramp)" or

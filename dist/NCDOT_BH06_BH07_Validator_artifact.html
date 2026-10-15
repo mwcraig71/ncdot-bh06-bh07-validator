@@ -375,6 +375,8 @@ body.field.sheet #fieldbar{background:var(--orange)}
 .drtab th:last-child,.drtab td:last-child{text-align:right;white-space:nowrap}
 .drtab tfoot td{font-weight:600;border-top:1px solid #bbb;border-bottom:0}
 .drt-note{color:#5A5A5A;font-size:11.5px;line-height:1.45}
+.drt-math{margin-top:5px;font-size:12px;line-height:1.45}
+.drt-sub{margin-top:8px;font-weight:600;color:#5A5A5A;font-size:11.5px}
 .drt-acts{margin-top:4px;font-size:12px}
 .drt-wait{margin-top:4px;color:#5A5A5A;font-size:11.5px}
 .dt-ab{background:#111;color:#fff;border:2px solid #fff;border-radius:50%;font:700 11px/16px var(--font-b,sans-serif);
@@ -920,7 +922,7 @@ const RULES=[
  {id:'DETOUR_0_LONG', grp:'qc', sev:'w', t:'Coded \u201cbypass at the site\u201d (0), but the measured detour is long',
   d:'Code 0 means traffic can get past at the structure itself. With this deck closed, the shortest way around on the road network adds more than 2 miles, so no bypass at the site is visible. A temporary or unmapped crossing would explain it; otherwise the code is wrong.'},
  {id:'DETOUR_FAR_OFF', grp:'note', sev:'i', t:'B.H.17 differs from the measured detour',
-  d:'The coded detour and the measured one differ by more than half and by more than 5 miles. From code 10 upward the two agree to a median within 3% statewide, so a gap this size is worth a look. It is commonest on code 1, which sits on 36% of structures and behaves like a default: measured detours there run a median 2.3 times the code.'}
+  d:'The coded detour and the measured one differ by more than half and by more than 5 miles. The measurement is FHWA SNBI Figure 102\u2019s: from where the detour turns off the road to where it turns back on, less the normal route between those points. Statewide, codes of 5 miles and up run a median of about twice that measurement, and match the distance measured from the bridge ends instead (shown in the panel) \u2014 so a long code here may have been measured from the bridge rather than from the turn points. On code 1 the two agree to a median within 10%.'}
 ];
 const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
 const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
@@ -2814,7 +2816,11 @@ function trafficPop(t,top){
    B.H.17  NCDOT's coded value, read off the bridge layer as DETOUR_LEN. It is
            in MILES - measured against 15,385 bridges, culverts and pipes, the
            miles reading is the closer one on 89% of them (95% for bridges
-           alone), and from code 10 upward the median measured/coded ratio is 1.03. 0 means a bypass at the
+           alone), and from code 10 upward the median measured/coded ratio is 1.03.
+           (Both against the bridge-end measurement. Against the Figure 102
+           one, codes of 5 and up run about twice the measurement - a median
+           ratio of 0.5 - which is what coding from the bridge rather than
+           from the turn points would give.) 0 means a bypass at the
            site; 99 is NCDOT's no-detour code; 199 appears once and its meaning
            is not published.
 
@@ -2823,6 +2829,9 @@ function trafficPop(t,top){
            the road beneath left open; for each road BENEATH, the ground under
            the span is closed and the deck left open. Minimum distance only -
            nothing on the way around is checked for clearance or posting.
+           The figure reported is FHWA SNBI Figure 102's (migration 0048): the
+           detour between where it turns off the road and where it turns back
+           on, less the normal route between the same two points.
 
    Keyed by structure, not by route and milepoint: a detour is a property of
    the crossing. A structure the statewide run did not reach says so; it is
@@ -2855,14 +2864,19 @@ async function loadDetour(bns,onProgress){
   for(let i=0;i<want.length;i+=200){
     const chunk=want.slice(i,i+200);
     const rows=await sbAll('detour_measured?select=brdg_nbr,mode,seq,road,heading,verdict,around_mi,'+
-      'direct_mi,additional_mi,probe_mi,reason,width_assumed,deck_inferred,graph_vintage'+
+      'direct_mi,additional_mi,report_mi,report_basis,probe_mi,reason,width_assumed,deck_inferred,graph_vintage'+
       '&brdg_nbr=in.'+sbIn(chunk));
     rows.forEach(r=>{
       const k=String(r.brdg_nbr).trim();
       let d=DETOUR.get(k);
       if(!d){ d={bypass:null,under:[],vintage:r.graph_vintage||''}; DETOUR.set(k,d); }
+      /* additional_mi is the figure everything else reads: the Figure 102
+         figure where one was measured (report_mi), else the bridge-end one.
+         ends_mi keeps the bridge-end figure; basis says which this is. */
+      const ends=num(r.additional_mi), rep_=num(r.report_mi);
       const row=Object.assign({},r,{around_mi:num(r.around_mi),direct_mi:num(r.direct_mi),
-        additional_mi:num(r.additional_mi),probe_mi:num(r.probe_mi)});
+        ends_mi:ends, additional_mi:rep_!=null?rep_:ends, basis:r.report_basis||null,
+        probe_mi:num(r.probe_mi)});
       if(r.mode==='bypass') d.bypass=row; else d.under.push(row);
       got++;
     });
@@ -2914,36 +2928,56 @@ async function detourCheck(scope,quiet){
 
 /* One measured value, in plain words.
 
-   The headline is the EXTRA distance the closure costs: the trip between two
-   points on the road, one each side of the structure, with it closed against
-   with it open. Where the road allows, those points sit at the ends of the
-   structure. Where it does not - a divided highway with no way off near the
-   bridge - they move out to where a driver can leave, and the sentence says how
-   far out, so a 1.0 mi "normal" trip is not mistaken for the bridge.
+   The headline is the EXTRA distance the closure costs, as FHWA SNBI Figure
+   102 draws it: the detour from where it turns off the road to where it turns
+   back on, less the normal route between those same two points. The road-by-
+   road lists under it show both, so the subtraction can be checked.
 
-   Two earlier versions got this wrong. The first called the open trip "straight
-   across", which read as a 4-mile bridge. The second added the structure's
-   length beside it, which is not part of the measurement and is already in the
-   inventory section, so it is gone. */
+   The statewide run first measured between the two ends of the structure. A
+   driver standing there has to double back to the nearest turn-off, and that
+   doubling back was counted as detour - about two miles too much on a typical
+   rural bridge. The bridge-end figure is still kept and is what is shown where
+   the turn points could not be used:
+
+   - a loop road: between the turn points there is a shorter way that does not
+     cross the bridge, so only traffic living between them uses it, and for
+     that traffic the bridge-end figure IS the detour;
+   - a route on which no turn points could be fixed.
+
+   Where the road allows, the bridge-end points sit at the ends of the
+   structure; where it does not - a divided highway with no way off near the
+   bridge - they move out to where a driver can leave, and the sentence says
+   how far out. */
 function detourDist(d){
   if(Math.abs(d-0.25)<1e-6) return 'a quarter mile';
   if(Math.abs(d-0.5)<1e-6) return 'half a mile';
   return (d<1?d.toFixed(2):String(Math.round(d*10)/10))+' mi';
 }
+const TURNS=r=>r&&(r.basis==='turn_points'||r.basis==='turn_points_along_road');
 function detourVal(r,b,mode){
   const sub=s=>'<div style="color:#5A5A5A;font-size:11.5px">'+s+'</div>';
   const how=[r.deck_inferred?'deck inferred: the map has the road but does not mark the bridge':'',
              r.width_assumed?'deck width assumed (30 ft)':''].filter(Boolean).join(' &middot; ');
   const near=r.probe_mi==null||r.probe_mi<0.2, both=r.direct_mi!=null&&r.around_mi!=null;
+  const ends=r.ends_mi!=null?r.ends_mi:r.additional_mi;
   const trip=!both?'':near
     ? 'Normally '+r.direct_mi.toFixed(1)+' mi '+(mode==='collapse'?'from one side of the bridge to the other':'from one end of the bridge to the other')+
       '; '+r.around_mi.toFixed(1)+' mi with it closed.'
     : 'No way off the road near the bridge, so the trip is measured from '+detourDist(r.probe_mi)+' before it to '+
       detourDist(r.probe_mi)+' past it: normally '+r.direct_mi.toFixed(1)+' mi, '+r.around_mi.toFixed(1)+' mi with '+
       (mode==='collapse'?'the road closed under the bridge.':'the bridge closed.');
+  const basis=TURNS(r)
+    ? 'Measured from where the detour turns off the road to where it turns back on, less the normal '+
+      'route between those two points (FHWA SNBI Figure 102).'+
+      (ends!=null&&Math.abs(ends-r.additional_mi)>=0.05?' From the bridge ends it would be '+ends.toFixed(1)+' mi.':'')
+    : r.basis==='bridge_ends_local'
+    ? 'Only local traffic uses this bridge: between where the detour leaves the road and where it rejoins it '+
+      'there is a shorter way that does not cross it (a loop road). For the traffic that does cross it, the '+
+      'detour is measured from the bridge ends. '+trip
+    : trip;
   if(r.verdict==='ok')
     return '<span class="mono" style="font-size:14px">'+r.additional_mi.toFixed(1)+' mi</span> extra with it closed'+
-      (trip?sub(trip):'')+(how?sub(how):'');
+      (basis?sub(basis):'')+(how?sub(how):'');
   if(r.verdict==='bypass_at_site')
     return '<span class="mono">'+(r.additional_mi||0).toFixed(2)+' mi</span> extra &mdash; a way past at the site'+
       (how?sub(how):'');
@@ -2964,10 +2998,16 @@ function detourVal(r,b,mode){
    each. Every row was produced by repeating the published measurement and
    kept only where it reproduced the published distances.
 
+   Migration 0048 adds the turn points: A where the detour turns off the road,
+   B where it turns back on, the detour and the normal route between them, and
+   the roads each uses. Where they are on file, they are what is drawn and
+   listed, because they are what the reported figure is measured on; where
+   the figure is from the bridge ends, the bridge-end route is.
+
    It is read for one bridge at a time, when that bridge is opened, so it costs
    nothing until it is wanted. On the map the detour is drawn in orange, the
-   normal route dashed grey, the measuring points as A and B, and the closed
-   points in red. In the panel each detour lists its roads in order with the
+   normal route dashed grey, A and B as lettered dots, and the closed points
+   in red. In the panel each detour lists its roads in order with the
    distance on each, totalled, so the number can be checked line by line, and
    links to the same path in Google Maps.
    ========================================================================== */
@@ -2997,7 +3037,9 @@ async function loadDetourRoute(bn){
   DROUTEASKED.add(k);
   try{
     const rows=await sbAll('detour_route?select=brdg_nbr,mode,seq,a,b,block,open_mi,around_mi,'+
-      'open_path,closed_path,open_steps,closed_steps&brdg_nbr=eq.'+encodeURIComponent(k));
+      'open_path,closed_path,open_steps,closed_steps,ja,jb,turn_detour_mi,turn_original_mi,'+
+      'turn_detour_path,turn_original_path,turn_detour_steps,turn_original_steps'+
+      '&brdg_nbr=eq.'+encodeURIComponent(k));
     DROUTE.set(k,rows);
   }catch(e){ DROUTEASKED.delete(k); throw e; }
 }
@@ -3008,13 +3050,24 @@ function routeOf(bn,mode,seq){
   return DROUTE.get(k).find(r=>r.mode===mode&&Number(r.seq)===Number(seq))||null;
 }
 
+/* What to draw and list for one route row: the turn points when they are on
+   file, else the bridge ends. */
+function routeView(r){
+  if(r&&r.ja&&r.jb&&r.turn_detour_path&&r.turn_detour_mi!=null&&r.turn_original_mi!=null)
+    return {turns:true, a:r.ja, b:r.jb, detour:r.turn_detour_path, normal:r.turn_original_path||'',
+            dmi:Number(r.turn_detour_mi), nmi:Number(r.turn_original_mi),
+            dsteps:r.turn_detour_steps||[], nsteps:r.turn_original_steps||[]};
+  return {turns:false, a:r.a, b:r.b, detour:r.closed_path||'', normal:r.open_path||'',
+          dmi:Number(r.around_mi), nmi:Number(r.open_mi), dsteps:r.closed_steps||[], nsteps:r.open_steps||[]};
+}
+
 function clearDetourMap(){
   detourLayer.clearLayers(); DSHOWN=null;
   if(detourKey){ try{ map.removeControl(detourKey); }catch(e){} detourKey=null; }
 }
 
 function gmapsLink(r){
-  const pts=decodePath(r.closed_path||'');
+  const v=routeView(r), pts=decodePath(v.detour);
   if(pts.length<2) return '';
   /* Google takes up to nine stops in between: sample eight along the path by
      distance, so Google follows the same roads rather than choosing its own. */
@@ -3029,28 +3082,30 @@ function gmapsLink(r){
     way.push(pts[i][0].toFixed(5)+','+pts[i][1].toFixed(5));
   }
   const ll=p=>Number(p[0]).toFixed(5)+','+Number(p[1]).toFixed(5);
-  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+ll(r.a)+
-    '&destination='+ll(r.b)+'&waypoints='+encodeURIComponent(way.join('|'));
+  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+ll(v.a)+
+    '&destination='+ll(v.b)+'&waypoints='+encodeURIComponent(way.join('|'));
 }
 
 function drawDetour(bn,mode,seq,fit){
   const r=routeOf(bn,mode,seq);
   clearDetourMap();
   if(!r) return false;
-  const closed=decodePath(r.closed_path||''), open=decodePath(r.open_path||'');
+  const v=routeView(r), closed=decodePath(v.detour), open=decodePath(v.normal);
   if(open.length>1) detourLayer.addLayer(L.polyline(open,{color:'#7A7A7A',weight:4,opacity:.9,
     dashArray:'7 7',interactive:false}));
   if(closed.length>1){
     detourLayer.addLayer(L.polyline(closed,{color:'#FFFFFF',weight:9,opacity:.85,interactive:false}));
     detourLayer.addLayer(L.polyline(closed,{color:'#E8590C',weight:5,opacity:1})
-      .bindTooltip('Detour with '+(mode==='bypass'?'the bridge':'the road beneath')+' closed: '+
-        Number(r.around_mi).toFixed(2)+' mi',{sticky:true}));
+      .bindTooltip('Detour with '+(mode==='bypass'?'the bridge':'the road beneath')+' closed'+
+        (v.turns?', turn-off to turn back on':'')+': '+v.dmi.toFixed(2)+' mi',{sticky:true}));
   }
   (r.block||[]).forEach(p=>detourLayer.addLayer(L.circleMarker(p,{radius:7,color:'#B00020',weight:3,
     fillColor:'#fff',fillOpacity:1}).bindTooltip('Closed for this measurement')));
-  [['A',r.a],['B',r.b]].forEach(([t,p])=>{ if(!p) return;
+  const tip=v.turns?{A:'A: the detour turns off the road here',B:'B: the detour turns back on here'}
+                   :{A:'Measuring point A',B:'Measuring point B'};
+  [['A',v.a],['B',v.b]].forEach(([t,p])=>{ if(!p) return;
     detourLayer.addLayer(L.marker(p,{icon:L.divIcon({className:'dt-ab',html:t,iconSize:[20,20],iconAnchor:[10,10]}),
-      keyboard:false}).bindTooltip('Measuring point '+t)); });
+      keyboard:false}).bindTooltip(tip[t])); });
   DSHOWN={bn:String(bn).trim(),mode,seq:Number(seq)};
   const d=detourOf(ALL.find(x=>x.BRDG_NBR===bn)||{BRDG_NBR:bn})||{};
   const m=mode==='bypass'?d.bypass:(d.under||[]).find(x=>Number(x.seq)===Number(seq));
@@ -3060,8 +3115,8 @@ function drawDetour(bn,mode,seq,fit){
     el.innerHTML='<b>Detour &middot; bridge '+esc(bn)+'</b> &middot; '+
       (mode==='bypass'?'bridge closed':'road beneath closed'+(m&&m.road?' ('+esc(m.road)+')':''))+
       (m&&m.additional_mi!=null?': <b>'+Number(m.additional_mi).toFixed(1)+' mi extra</b>':'')+
-      '<div><span class="sw" style="background:#E8590C"></span>detour '+Number(r.around_mi).toFixed(2)+' mi'+
-      ' &nbsp;<span class="sw dash"></span>normal '+Number(r.open_mi).toFixed(2)+' mi'+
+      '<div><span class="sw" style="background:#E8590C"></span>detour '+v.dmi.toFixed(2)+' mi'+
+      ' &nbsp;<span class="sw dash"></span>normal '+v.nmi.toFixed(2)+' mi'+
       ' &nbsp;<span class="sw dot"></span>closed</div>'+
       '<div class="dt-acts"><a href="#" data-dt="fit">Fit to map</a> &middot; <a href="#" data-dt="hide">Hide</a></div>';
     L.DomEvent.disableClickPropagation(el);
@@ -3079,23 +3134,32 @@ function fitDetour(){
   if(b.isValid()) map.fitBounds(b,{padding:[34,34],maxZoom:16});
 }
 
-/* The panel's part: the roads in order with the distance on each, the total,
-   and the normal route beside it. */
+/* The panel's part: the subtraction the reported figure is, then the roads of
+   each route in order with the distance on each, totalled, so it can be
+   checked line by line. */
 function detourRouteHtml(b,row){
   if(!row||!['ok','bypass_at_site'].includes(row.verdict)) return '';
   const r=routeOf(b.BRDG_NBR,row.mode,row.seq);
   if(r===undefined) return '<div class="drt-wait">Reading the route&hellip;</div>';
   if(r===null) return '<div class="drt-wait">The route for this measurement is not on file.</div>';
-  const steps=r.closed_steps||[], tot=steps.reduce((t,x)=>t+Number(x.mi||0),0);
-  const open=(r.open_steps||[]).map(x=>esc(x.n)+' '+Number(x.mi).toFixed(2)+' mi').join(', ');
+  const v=routeView(r);
+  const sum=st=>st.reduce((t,x)=>t+Number(x.mi||0),0);
+  const tab=(st,foot)=>'<table class="drtab"><thead><tr><th>Road, in order</th><th>mi</th></tr></thead><tbody>'+
+    st.map(x=>'<tr><td>'+esc(x.n)+'</td><td class="mono">'+Number(x.mi).toFixed(2)+'</td></tr>').join('')+
+    '</tbody><tfoot><tr><td>'+foot+'</td><td class="mono">'+sum(st).toFixed(2)+'</td></tr></tfoot></table>';
   const on=DSHOWN&&DSHOWN.bn===String(b.BRDG_NBR).trim()&&DSHOWN.mode===row.mode&&DSHOWN.seq===Number(row.seq);
-  return '<details class="drt"><summary>The detour, road by road ('+steps.length+' road'+(steps.length===1?'':'s')+')</summary>'+
-    '<table class="drtab"><thead><tr><th>Road, in order</th><th>mi</th></tr></thead><tbody>'+
-    steps.map(x=>'<tr><td>'+esc(x.n)+'</td><td class="mono">'+Number(x.mi).toFixed(2)+'</td></tr>').join('')+
-    '</tbody><tfoot><tr><td>Total with it closed</td><td class="mono">'+tot.toFixed(2)+'</td></tr></tfoot></table>'+
-    '<div class="drt-note">Normally: '+(open||'&mdash;')+' &mdash; '+Number(r.open_mi).toFixed(2)+' mi. '+
-    'The difference, '+(tot-Number(r.open_mi)).toFixed(2)+' mi, is the extra the closure costs. '+
-    'Road names are OpenStreetMap&rsquo;s.</div></details>'+
+  const diff=v.dmi-v.nmi;
+  /* three decimals, so the subtraction on screen is exact */
+  const math='<div class="drt-math">Detour <span class="mono">'+v.dmi.toFixed(3)+'</span> &minus; normal route <span class="mono">'+
+    v.nmi.toFixed(3)+'</span> = <b class="mono">'+(diff<0?'0.000':diff.toFixed(3))+' mi</b> extra'+
+    (v.turns?', from turn-off <b>A</b> to turn back on <b>B</b>':', from <b>A</b> to <b>B</b> at the bridge ends')+
+    (diff<0?' <span style="color:#5A5A5A">(the way around is no longer)</span>':'')+'</div>';
+  return math+
+    '<details class="drt"><summary>The detour, road by road ('+v.dsteps.length+' road'+(v.dsteps.length===1?'':'s')+')</summary>'+
+    tab(v.dsteps,v.turns?'Detour, A to B':'Total with it closed')+
+    '<div class="drt-sub">The normal route between the same two points</div>'+
+    tab(v.nsteps,'Normal route, A to B')+
+    '<div class="drt-note">Road names are OpenStreetMap&rsquo;s.</div></details>'+
     '<div class="drt-acts"><a href="#" data-dshow="'+row.mode+'|'+row.seq+'">'+(on?'Shown on the map &middot; fit to it':'Show on the map')+'</a>'+
     ' &middot; <a href="'+esc(gmapsLink(r))+'" target="_blank" rel="noopener">Check in Google Maps</a></div>';
 }
@@ -4895,7 +4959,7 @@ function exportCSV(){
     'ROUTE_CLASS','INVENTORY_CODE','ROUTE_LRS_MIN_MP','ROUTE_LRS_MAX_MP','OFFSET_FT',
     'BH09_AADT','BH10_AADTT','BH11_AADT_YEAR','AADT_BASIS','AADT_STATION','AADT_TRUCK_SHARE','AADT_SHARE_YEAR',
     'AADT_PROBE_LO95','AADT_PROBE_HI95','NCDOT_RECORD_AADT',
-    'BH17_NCDOT_CODE','BH17_MEANING','DETOUR_MEASURED','DETOUR_EXTRA_MI','DETOUR_MEASURED_EACH_SIDE_MI',
+    'BH17_NCDOT_CODE','BH17_MEANING','DETOUR_MEASURED','DETOUR_EXTRA_MI','DETOUR_BASIS','DETOUR_EXTRA_BRIDGE_ENDS_MI','DETOUR_MEASURED_EACH_SIDE_MI',
     'DETOUR_ROUTE_OPEN_MI','DETOUR_ROUTE_CLOSED_MI','DETOUR_NOTE','DETOUR_BENEATH','DETOUR_GRAPH','F_CARRIED','FTR_INTRSC','MAINT_RESP',
     'FUNC_CLASS','LAT_DD','LONG_DD','REVIEW_STATUS','REVIEW_NOTE','REVIEW_BY','REVIEW_DATE','CORRECTED_BH06','CORRECTED_BH07','CLEARED_FINDINGS','STRUCTURE_TYPE','DECK_COND','SUPER_COND','SUB_COND','CULVERT_COND','LAST_INSPECTED','YEAR_BUILT','SCOUR_CRITICAL','FRACTURE_CRITICAL','POSTED','STRUCTURE_LENGTH','DECK_WIDTH','SKEW','NHS','LEGACY_INV_ROUTE','SUGGESTED_BH06','SUGGESTED_BH07','CARRIED_TRIAGE','SEVERITY','FAILS_FHWA','FHWA_RULES','FHWA_FINDINGS','QC_FINDINGS','NOTES','FINDING_CODES'];
   const q=v=>{v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
@@ -4930,10 +4994,16 @@ function exportCSV(){
       (c=>c.code==null?'':c.code)(bh17(b)), bh17(b).label,
       (d=>d===undefined?'NOT LOOKED UP':!d||!d.bypass?'NOT MEASURED':
         ({ok:'MEASURED',bypass_at_site:'BYPASS AT SITE',no_detour:'NO DETOUR',unmeasured:'UNMEASURED'}[d.bypass.verdict]||d.bypass.verdict))(detourOf(b)),
-      /* The extra miles is the detour. The two route lengths are between the
+      /* The extra miles is the detour, as Figure 102 measures it. The two route
+         lengths after it are the bridge-end measurement's, between its
          measuring points, which can sit miles out on an interstate, so they are
          named for what they are rather than "around" and "across". */
       (d=>d&&d.bypass&&d.bypass.additional_mi!=null?d.bypass.additional_mi.toFixed(3):'')(detourOf(b)),
+      /* how DETOUR_EXTRA_MI was measured, and the bridge-end figure it replaced */
+      (d=>!d||!d.bypass||d.bypass.additional_mi==null?'':({turn_points:'TURN POINTS (FIG 102)',
+        turn_points_along_road:'TURN POINTS (FIG 102), ALONG THE ROAD',bridge_ends_local:'BRIDGE ENDS: LOCAL TRAFFIC ONLY',
+        bridge_ends:'BRIDGE ENDS'}[d.bypass.basis]||'BRIDGE ENDS'))(detourOf(b)),
+      (d=>d&&d.bypass&&d.bypass.ends_mi!=null?d.bypass.ends_mi.toFixed(3):'')(detourOf(b)),
       (d=>d&&d.bypass&&d.bypass.probe_mi!=null&&d.bypass.additional_mi!=null?d.bypass.probe_mi.toFixed(2):'')(detourOf(b)),
       (d=>d&&d.bypass&&d.bypass.direct_mi!=null?d.bypass.direct_mi.toFixed(3):'')(detourOf(b)),
       (d=>d&&d.bypass&&d.bypass.around_mi!=null?d.bypass.around_mi.toFixed(3):'')(detourOf(b)),
