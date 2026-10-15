@@ -789,6 +789,31 @@ beneath it, the pin shows the detour for that road closing instead.
 **Run all checks** reads the detour lengths for the scope automatically, and opening a bridge reads
 its own. It is one read per 200 structures, so there is no switch for it.
 
+### Seeing and checking the detour
+
+A distance alone can't be checked, so every measured detour also carries the route it was
+measured on. Open a bridge and its detour is drawn on the map:
+
+- **Orange:** the detour, with the bridge closed.
+- **Dashed grey:** the normal route between the same two points.
+- **A and B:** the two measuring points.
+- **Red ring:** the point that was closed.
+
+A key in the corner names the bridge and the extra miles, and has **Fit to map** and **Hide**.
+
+In the panel, under each calculated detour, **The detour, road by road** lists the roads in
+order with the distance on each, totalled. The total is the detour. Beside it is the normal route,
+and the difference between the two is the extra the closure costs.
+
+- **Show on the map** draws that particular detour and fits the map to it. Use it for a road
+  beneath, or on a phone, where it also closes the panel so you can see the map.
+- **Check in Google Maps** opens the same path in Google Maps, from A to B through eight points
+  along the detour. You can compare it against Google's map and Street View.
+
+Road names are OpenStreetMap's. A step with no name in the map shows as "(ramp)" or
+"(unnamed road)". Each route was produced by repeating the published measurement on the same map,
+and kept only where it reproduced the published distances to within 0.01 mi.
+
 ---
 
 ## Approvals — deciding what the field submitted

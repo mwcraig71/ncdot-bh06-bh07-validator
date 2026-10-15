@@ -205,6 +205,8 @@ bridge's own on the carried road, the road-beneath detour on a road under it. It
 last section fails the read and asserts the tool says "not looked up" rather than
 drawing an empty state, and raises no finding on missing data.
 
+It also pins the route behind each detour (migration 0046): opening a bridge reads its route, one bridge at a time, and draws the detour in orange, the normal route dashed grey, the measuring points as A and B and the closed point in red; the panel lists the detour road by road with a total equal to the detour, links to the same path in Google Maps, and "Show on the map" fits the map to it. Opening another bridge clears it, a dead end draws nothing, a route not on file says so, and a failed route read leaves the distances standing.
+
 It also pins three fixes from the 13 October review. The panel never calls the
 trip between the measuring points "straight across": on a divided highway those
 points sit out where a driver can leave, so that trip can be a mile or more, and
@@ -223,7 +225,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **106** features, **21** columns, **66** field,
-**51** approvals, **60** traffic, **88** detour — 518 in all.
+**51** approvals, **60** traffic, **107** detour — 537 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

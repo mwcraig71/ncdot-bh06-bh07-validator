@@ -64,6 +64,24 @@ const DETOUR=()=>[
    width_assumed:true,deck_inferred:false,graph_vintage:V},
 ];
 
+/* The route behind two of 590819's measurements (migration 0046). Paths are
+   encoded the way the pipeline writes them: polyline, precision 6. */
+const enc=pts=>{let o='',pl=0,pn=0;for(const [la,lo] of pts){const a=Math.round(la*1e6),b=Math.round(lo*1e6);
+  for(let v of [a-pl,b-pn]){v=v<0?~(v<<1):(v<<1);while(v>=0x20){o+=String.fromCharCode((0x20|(v&0x1f))+63);v>>=5;}
+  o+=String.fromCharCode(v+63);} pl=a;pn=b;} return o;};
+const RA=[35.2400,-80.9600], RB=[35.2420,-80.9580];
+const CLOSED_PTS=[RA,[35.2380,-80.9550],[35.2390,-80.9480],[35.2440,-80.9500],RB];
+const DROUTE=()=>[
+  {brdg_nbr:'590819',mode:'bypass',seq:0,a:RA,b:RB,block:[[35.2410,-80.9590]],open_mi:0.14,around_mi:2.0,
+   open_path:enc([RA,RB]),closed_path:enc(CLOSED_PTS),
+   open_steps:[{n:'I 85 North',mi:0.14}],
+   closed_steps:[{n:'I 85 North',mi:0.3},{n:'(ramp)',mi:0.25},{n:'Little Rock Road',mi:1.1},{n:'(ramp)',mi:0.2},{n:'I 85 North',mi:0.15}]},
+  {brdg_nbr:'590819',mode:'collapse',seq:0,a:[35.2300,-80.9700],b:[35.2500,-80.9500],block:[[35.2410,-80.9590]],
+   open_mi:1.8,around_mi:3.1,open_path:enc([[35.2300,-80.9700],[35.2500,-80.9500]]),
+   closed_path:enc([[35.2300,-80.9700],[35.2200,-80.9600],[35.2500,-80.9500]]),
+   open_steps:[{n:'I 485 Inner',mi:1.8}],closed_steps:[{n:'I 485 Inner',mi:0.9},{n:'Wilkinson Boulevard / US 29',mi:2.2}]},
+];
+
 let PINRID=I85, PINMP=2.672;
 
 const mk=async(b,opts={})=>{
@@ -95,7 +113,7 @@ const mk=async(b,opts={})=>{
     return J({features:[]});
   });
   const m=await sbmock(p,Object.assign({bridges, snbi:FX.snbi.map(x=>Object.assign({},x)),
-    detour:DETOUR()},opts));
+    detour:DETOUR(), droute:DROUTE()},opts));
   return {ctx,p,m};
 };
 
@@ -382,6 +400,64 @@ const fields=l=>{const out=[];let cur='',q=false;
        stypeGroup({BRDG_TYP_NM:'Pipe'}),stypeGroup({BRDG_TYP_NM:'CULVERT'}),stypeGroup({BRDG_TYP_NM:'SIGN'})].join()),
      'bridge,bridge,culvert,culvert,other');
 
+  console.log('\n7e. The route behind the detour: drawn on the map, listed road by road');
+  await p.evaluate(()=>{map.closePopup(); select('590213',true);});
+  await p.waitForTimeout(400);
+  await p.evaluate(()=>select('590819',true));
+  await p.waitForFunction(()=>DROUTE.has('590819')&&!!DSHOWN,null,{timeout:15000});
+  await p.waitForTimeout(300);
+  ok('the route is read one bridge at a time, for the bridge opened',
+     m.reads('detour_route').length>0&&m.reads('detour_route').every(r=>/brdg_nbr=eq\.\d{6}(&|$)/.test(r.url)),true);
+  ok('...once per bridge, however often it is opened',
+     await p.evaluate(async()=>{ select('590213',true); select('590819',true); await new Promise(r=>setTimeout(r,300)); return 0;})
+       .then(()=>m.reads('detour_route').filter(r=>/590819/.test(r.url)).length),1);
+  await p.waitForFunction(()=>!!DSHOWN&&DSHOWN.bn==='590819',null,{timeout:8000});
+  const lay=await p.evaluate(()=>{ const o={lines:0,closedPts:0,ab:0,orange:0,grey:0};
+    detourLayer.eachLayer(l=>{ if(l instanceof L.Polyline){ o.lines++; if(l.options.color==='#E8590C'){o.orange++; o.closedPts=l.getLatLngs().length;}
+      if(l.options.dashArray) o.grey++; } else if(l instanceof L.CircleMarker) o.block=(o.block||0)+1; else if(l instanceof L.Marker) o.ab++; });
+    return o; });
+  console.log('   '+JSON.stringify(lay));
+  ok('opening the bridge draws its detour: the closed route in orange, every vertex of it',lay.orange===1&&lay.closedPts===5,true);
+  ok('...the normal route dashed grey beside it',lay.grey,1);
+  ok('...the measuring points as A and B, and the closed point in red',lay.ab===2&&lay.block===1,true);
+  ok('...with a key saying which detour it is and its extra miles',
+     await p.evaluate(()=>/Detour · bridge 590819 · bridge closed: 1\.9 mi extra/.test(document.querySelector('.dt-key').innerText)),true);
+  const tb=await p.evaluate(()=>{const d=document.querySelector('#dr-body details.drt'); if(!d) return null; d.open=true;
+    return {rows:[...d.querySelectorAll('tbody tr')].map(r=>r.innerText.replace(/\s+/g,' ').trim()),
+            tot:d.querySelector('tfoot').innerText.replace(/\s+/g,' ').trim(), note:d.querySelector('.drt-note').innerText};});
+  console.log('   '+JSON.stringify(tb));
+  ok('the panel lists the detour road by road, in order, with the distance on each',
+     tb&&tb.rows.join(' | '),'I 85 North 0.30 | (ramp) 0.25 | Little Rock Road 1.10 | (ramp) 0.20 | I 85 North 0.15');
+  ok('...totalled, and the total is the detour',tb&&tb.tot,'Total with it closed 2.00');
+  ok('...with the normal route and the difference, which is the extra',
+     !!tb&&/Normally: I 85 North 0\.14 mi — 0\.14 mi\. The difference, 1\.86 mi, is the extra/.test(tb.note),true);
+  ok('each road beneath gets its own table',
+     await p.evaluate(()=>document.querySelectorAll('#dr-body details.drt').length),2);
+  const gm=await p.evaluate(()=>[...document.querySelectorAll('#dr-body .drt-acts a')].find(a=>/Google/.test(a.textContent)).href);
+  ok('"Check in Google Maps" goes from A to B through eight points on the same path',
+     /google\.com\/maps\/dir\/\?api=1&travelmode=driving&origin=35\.24000,-80\.96000&destination=35\.24200,-80\.95800&waypoints=/.test(gm)&&
+     decodeURIComponent(gm.split('waypoints=')[1]).split('|').length===8,true);
+  const fit=await p.evaluate(()=>{ map.setView([35.0,-79.0],9);
+    const a=[...document.querySelectorAll('#dr-body a[data-dshow]')].find(x=>x.dataset.dshow==='collapse|0'); a.click();
+    return new Promise(res=>setTimeout(()=>{ const b=map.getBounds(); res( {shown:DSHOWN.mode+'|'+DSHOWN.seq, has:b.contains([35.2200,-80.9600])&&b.contains([35.25,-80.95])}); },900)); });
+  console.log('   '+JSON.stringify(fit));
+  ok('"Show on the map" draws that detour instead and fits the map to it',fit.shown==='collapse|0'&&fit.has,true);
+  ok('the path decodes to what was encoded',
+     await p.evaluate(()=>JSON.stringify(decodePath(DROUTE.get('590819')[0].closed_path))),
+     JSON.stringify(CLOSED_PTS));
+  ok('"Hide" takes it off the map',
+     await p.evaluate(()=>{ document.querySelector('.dt-key a[data-dt="hide"]').click();
+       let n=0; detourLayer.eachLayer(()=>n++); return n+'|'+!!document.querySelector('.dt-key'); }),'0|false');
+  await p.evaluate(()=>drawDetour('590819','bypass',0,false));
+  await p.evaluate(()=>select('590213',true)); await p.waitForTimeout(300);
+  ok('opening another bridge takes the last one\'s detour off the map',
+     await p.evaluate(()=>{ let n=0; detourLayer.eachLayer(()=>n++); return n; }),0);
+  ok('a bridge with no detour (a dead end) draws nothing and shows no route table',
+     await p.evaluate(()=>!DSHOWN&&!document.querySelector('#dr-body details.drt')),true);
+  ok('a measured detour whose route is not on file says so, rather than drawing anything',
+     await p.evaluate(async()=>{ select('590668',true); await new Promise(r=>setTimeout(r,500));
+       return /route for this measurement is not on file/.test(document.getElementById('dr-body').innerText)&&!DSHOWN; }),true);
+
   console.log('\n8. A failed read is reported, not drawn as "no detour anywhere"');
   const {p:p2,m:m2}=await mk(b,{fail:'detour_measured'});
   const errs2=[]; p2.on('pageerror',e=>errs2.push(e.message)); p2.on('dialog',d=>d.accept(''));
@@ -401,6 +477,20 @@ const fields=l=>{const out=[];let cur='',q=false;
   ok('asked by hand, the failure is said out loud',
      await p2.evaluate(async()=>{await detourCheck(); return /could not be read/.test(document.getElementById('toast').textContent);}),true);
   console.log('   page errors (failed read): '+JSON.stringify(errs2));
+  console.log('\n8b. A failed route read leaves the distances standing');
+  const {p:p3}=await mk(b,{fail:'detour_route'});
+  const errs3=[]; p3.on('pageerror',e=>errs3.push(e.message)); p3.on('dialog',d=>d.accept(''));
+  await p3.goto('file://'+FILE); await p3.waitForTimeout(2200);
+  await p3.evaluate(()=>{['autoheavy','autohpms','autotraffic'].forEach(id=>{
+    const e=document.getElementById(id); if(e) e.checked=false;});});
+  await p3.selectOption('#mode','county'); await p3.waitForTimeout(300);
+  await p3.selectOption('#arg','MECKLENBURG'); await p3.click('#run');
+  await p3.waitForFunction(()=>ALL.length>0,null,{timeout:60000}); await p3.waitForTimeout(2500);
+  const t3=await p3.evaluate(async()=>{ select('590819',true); await new Promise(r=>setTimeout(r,1500));
+    return {txt:document.getElementById('dr-body').innerText, shown:!!DSHOWN}; });
+  ok('the detour distance still shows when its route cannot be read',/Calculated detour length\s*1\.9 mi extra/i.test(t3.txt),true);
+  ok('...nothing is drawn, and no page error',!t3.shown&&errs3.length===0,true);
+
 
   console.log('\npage errors: '+JSON.stringify(errs));
   await b.close();

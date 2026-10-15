@@ -1008,6 +1008,9 @@ body.on-imagery .cntylab{color:#fff;
 #fb-state{flex:1;font-size:11px;letter-spacing:.02em;color:#C8C8C8;text-transform:none;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 body.field #drawer{z-index:1200}
+/* the field bar sits over the bottom of the map: lift the map's own bottom
+   controls (the detour key, the attribution) clear of it */
+body.field .leaflet-bottom{bottom:calc(58px + env(safe-area-inset-bottom))}
 body.field.sheet #fieldbar{background:var(--orange)}
 @media (max-width:520px){
   .hdr-t h1{font-size:12.5px}
@@ -1034,6 +1037,23 @@ body.field.sheet #fieldbar{background:var(--orange)}
 .pop-row .k{color:#5A5A5A;font-size:11.5px}
 .pop-row .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
 .pop-row .v.mono{font-size:14.5px}
+.drt{margin-top:6px;font-size:12px}
+.drt summary{cursor:pointer;color:#1E56B3}
+.drtab{width:100%;border-collapse:collapse;margin:5px 0 3px;font-size:12px}
+.drtab th{text-align:left;font-weight:600;color:#5A5A5A;border-bottom:1px solid #ddd;padding:2px 4px}
+.drtab td{padding:2px 4px;border-bottom:1px solid #f0f0f0;vertical-align:top}
+.drtab th:last-child,.drtab td:last-child{text-align:right;white-space:nowrap}
+.drtab tfoot td{font-weight:600;border-top:1px solid #bbb;border-bottom:0}
+.drt-note{color:#5A5A5A;font-size:11.5px;line-height:1.45}
+.drt-acts{margin-top:4px;font-size:12px}
+.drt-wait{margin-top:4px;color:#5A5A5A;font-size:11.5px}
+.dt-ab{background:#111;color:#fff;border:2px solid #fff;border-radius:50%;font:700 11px/16px var(--font-b,sans-serif);
+  text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+.dt-key{background:#fff;padding:7px 10px;font-size:12px;line-height:1.5;box-shadow:0 1px 5px rgba(0,0,0,.3);max-width:320px}
+.dt-key .sw{display:inline-block;width:18px;height:4px;vertical-align:middle;margin-right:4px}
+.dt-key .sw.dash{background:repeating-linear-gradient(90deg,#7A7A7A 0 5px,transparent 5px 9px)}
+.dt-key .sw.dot{width:10px;height:10px;border:3px solid #B00020;border-radius:50%;background:#fff;box-sizing:border-box}
+.dt-acts{margin-top:2px}
 .pop-sub{margin-top:8px;padding-top:6px;border-top:1px solid #ddd;font-size:11.5px;color:var(--black)}
 .pop-t{font-family:var(--font-h);font-size:14px;font-weight:500;text-transform:uppercase;color:var(--black);
   border-bottom:2px solid var(--orange);padding-bottom:3px;margin-bottom:6px}
@@ -2282,7 +2302,7 @@ async function run(){
     /* The previous scope's results must not stay on screen under the new
        scope's name: clear them, so a failed query reads as a failed query. */
     ALL=[]; SEL=null;
-    $('drawer').classList.remove('open'); routeLayer.clearLayers();
+    $('drawer').classList.remove('open'); routeLayer.clearLayers(); clearDetourMap();
     revalidate(); populateFilters(); activeChecks.clear(); applyFilters();
     ['deep','locate','resolve','snbibtn','fillnull','expandfeat','traffic','resolvenamed','csv']
       .forEach(id=>{ const n=$(id); if(n) n.disabled=true; });
@@ -3623,6 +3643,152 @@ function detourVal(r,b,mode){
 
 /* The panel section: B.H.17 first, because it is the reported item, then the
    measurements it can be checked against. */
+/* ==========================================================================
+   THE ROUTE BEHIND THE DETOUR
+   --------------------------------------------------------------------------
+   A distance on its own cannot be checked. detour_route (migration 0046) holds
+   what each measured detour was measured on: the two measuring points, the
+   points that were closed, the route between the points with nothing closed
+   and with the closure, and the roads each route uses with the distance on
+   each. Every row was produced by repeating the published measurement and
+   kept only where it reproduced the published distances.
+
+   It is read for one bridge at a time, when that bridge is opened, so it costs
+   nothing until it is wanted. On the map the detour is drawn in orange, the
+   normal route dashed grey, the measuring points as A and B, and the closed
+   points in red. In the panel each detour lists its roads in order with the
+   distance on each, totalled, so the number can be checked line by line, and
+   links to the same path in Google Maps.
+   ========================================================================== */
+const DROUTE=new Map();            /* brdg_nbr -> [rows] once read */
+const DROUTEASKED=new Set();
+let DSHOWN=null;                   /* {bn, mode, seq} drawn on the map now */
+const detourLayer=L.layerGroup().addTo(map);
+let detourKey=null;
+
+function decodePath(str,prec){
+  const f=prec||1e6, out=[]; let i=0, lat=0, lon=0;
+  while(i<str.length){
+    for(const k of [0,1]){
+      let sh=0, res=0, b;
+      do{ b=str.charCodeAt(i++)-63; res|=(b&0x1f)<<sh; sh+=5; }while(b>=0x20&&i<=str.length);
+      const d=(res&1)?~(res>>1):(res>>1);
+      if(k===0) lat+=d; else lon+=d;
+    }
+    out.push([lat/f, lon/f]);
+  }
+  return out;
+}
+
+async function loadDetourRoute(bn){
+  const k=String(bn==null?'':bn).trim();
+  if(!k||DROUTEASKED.has(k)) return;
+  DROUTEASKED.add(k);
+  try{
+    const rows=await sbAll('detour_route?select=brdg_nbr,mode,seq,a,b,block,open_mi,around_mi,'+
+      'open_path,closed_path,open_steps,closed_steps&brdg_nbr=eq.'+encodeURIComponent(k));
+    DROUTE.set(k,rows);
+  }catch(e){ DROUTEASKED.delete(k); throw e; }
+}
+/* undefined: not read yet. null: read, and there is no route for this one. */
+function routeOf(bn,mode,seq){
+  const k=String(bn==null?'':bn).trim();
+  if(!DROUTEASKED.has(k)||!DROUTE.has(k)) return undefined;
+  return DROUTE.get(k).find(r=>r.mode===mode&&Number(r.seq)===Number(seq))||null;
+}
+
+function clearDetourMap(){
+  detourLayer.clearLayers(); DSHOWN=null;
+  if(detourKey){ try{ map.removeControl(detourKey); }catch(e){} detourKey=null; }
+}
+
+function gmapsLink(r){
+  const pts=decodePath(r.closed_path||'');
+  if(pts.length<2) return '';
+  /* Google takes up to nine stops in between: sample eight along the path by
+     distance, so Google follows the same roads rather than choosing its own. */
+  const cum=[0];
+  for(let i=1;i<pts.length;i++){
+    const a=pts[i-1], b=pts[i], k=Math.cos(a[0]*Math.PI/180);
+    cum.push(cum[i-1]+Math.hypot(b[0]-a[0],(b[1]-a[1])*k));
+  }
+  const L0=cum[cum.length-1], way=[];
+  for(let j=1;j<=8;j++){
+    const t=L0*j/9; let i=cum.findIndex(c=>c>=t); if(i<1) i=1;
+    way.push(pts[i][0].toFixed(5)+','+pts[i][1].toFixed(5));
+  }
+  const ll=p=>Number(p[0]).toFixed(5)+','+Number(p[1]).toFixed(5);
+  return 'https://www.google.com/maps/dir/?api=1&travelmode=driving&origin='+ll(r.a)+
+    '&destination='+ll(r.b)+'&waypoints='+encodeURIComponent(way.join('|'));
+}
+
+function drawDetour(bn,mode,seq,fit){
+  const r=routeOf(bn,mode,seq);
+  clearDetourMap();
+  if(!r) return false;
+  const closed=decodePath(r.closed_path||''), open=decodePath(r.open_path||'');
+  if(open.length>1) detourLayer.addLayer(L.polyline(open,{color:'#7A7A7A',weight:4,opacity:.9,
+    dashArray:'7 7',interactive:false}));
+  if(closed.length>1){
+    detourLayer.addLayer(L.polyline(closed,{color:'#FFFFFF',weight:9,opacity:.85,interactive:false}));
+    detourLayer.addLayer(L.polyline(closed,{color:'#E8590C',weight:5,opacity:1})
+      .bindTooltip('Detour with '+(mode==='bypass'?'the bridge':'the road beneath')+' closed: '+
+        Number(r.around_mi).toFixed(2)+' mi',{sticky:true}));
+  }
+  (r.block||[]).forEach(p=>detourLayer.addLayer(L.circleMarker(p,{radius:7,color:'#B00020',weight:3,
+    fillColor:'#fff',fillOpacity:1}).bindTooltip('Closed for this measurement')));
+  [['A',r.a],['B',r.b]].forEach(([t,p])=>{ if(!p) return;
+    detourLayer.addLayer(L.marker(p,{icon:L.divIcon({className:'dt-ab',html:t,iconSize:[20,20],iconAnchor:[10,10]}),
+      keyboard:false}).bindTooltip('Measuring point '+t)); });
+  DSHOWN={bn:String(bn).trim(),mode,seq:Number(seq)};
+  const d=detourOf(ALL.find(x=>x.BRDG_NBR===bn)||{BRDG_NBR:bn})||{};
+  const m=mode==='bypass'?d.bypass:(d.under||[]).find(x=>Number(x.seq)===Number(seq));
+  detourKey=L.control({position:'bottomleft'});
+  detourKey.onAdd=()=>{
+    const el=L.DomUtil.create('div','dt-key');
+    el.innerHTML='<b>Detour &middot; bridge '+esc(bn)+'</b> &middot; '+
+      (mode==='bypass'?'bridge closed':'road beneath closed'+(m&&m.road?' ('+esc(m.road)+')':''))+
+      (m&&m.additional_mi!=null?': <b>'+Number(m.additional_mi).toFixed(1)+' mi extra</b>':'')+
+      '<div><span class="sw" style="background:#E8590C"></span>detour '+Number(r.around_mi).toFixed(2)+' mi'+
+      ' &nbsp;<span class="sw dash"></span>normal '+Number(r.open_mi).toFixed(2)+' mi'+
+      ' &nbsp;<span class="sw dot"></span>closed</div>'+
+      '<div class="dt-acts"><a href="#" data-dt="fit">Fit to map</a> &middot; <a href="#" data-dt="hide">Hide</a></div>';
+    L.DomEvent.disableClickPropagation(el);
+    el.addEventListener('click',e=>{ const a=e.target.closest('a[data-dt]'); if(!a) return; e.preventDefault();
+      if(a.dataset.dt==='hide') clearDetourMap(); else fitDetour(); });
+    return el;
+  };
+  detourKey.addTo(map);
+  if(fit) fitDetour();
+  return true;
+}
+function fitDetour(){
+  const b=L.latLngBounds([]);
+  detourLayer.eachLayer(l=>{ if(l.getBounds) b.extend(l.getBounds()); else if(l.getLatLng) b.extend(l.getLatLng()); });
+  if(b.isValid()) map.fitBounds(b,{padding:[34,34],maxZoom:16});
+}
+
+/* The panel's part: the roads in order with the distance on each, the total,
+   and the normal route beside it. */
+function detourRouteHtml(b,row){
+  if(!row||!['ok','bypass_at_site'].includes(row.verdict)) return '';
+  const r=routeOf(b.BRDG_NBR,row.mode,row.seq);
+  if(r===undefined) return '<div class="drt-wait">Reading the route&hellip;</div>';
+  if(r===null) return '<div class="drt-wait">The route for this measurement is not on file.</div>';
+  const steps=r.closed_steps||[], tot=steps.reduce((t,x)=>t+Number(x.mi||0),0);
+  const open=(r.open_steps||[]).map(x=>esc(x.n)+' '+Number(x.mi).toFixed(2)+' mi').join(', ');
+  const on=DSHOWN&&DSHOWN.bn===String(b.BRDG_NBR).trim()&&DSHOWN.mode===row.mode&&DSHOWN.seq===Number(row.seq);
+  return '<details class="drt"><summary>The detour, road by road ('+steps.length+' road'+(steps.length===1?'':'s')+')</summary>'+
+    '<table class="drtab"><thead><tr><th>Road, in order</th><th>mi</th></tr></thead><tbody>'+
+    steps.map(x=>'<tr><td>'+esc(x.n)+'</td><td class="mono">'+Number(x.mi).toFixed(2)+'</td></tr>').join('')+
+    '</tbody><tfoot><tr><td>Total with it closed</td><td class="mono">'+tot.toFixed(2)+'</td></tr></tfoot></table>'+
+    '<div class="drt-note">Normally: '+(open||'&mdash;')+' &mdash; '+Number(r.open_mi).toFixed(2)+' mi. '+
+    'The difference, '+(tot-Number(r.open_mi)).toFixed(2)+' mi, is the extra the closure costs. '+
+    'Road names are OpenStreetMap&rsquo;s.</div></details>'+
+    '<div class="drt-acts"><a href="#" data-dshow="'+row.mode+'|'+row.seq+'">'+(on?'Shown on the map &middot; fit to it':'Show on the map')+'</a>'+
+    ' &middot; <a href="'+esc(gmapsLink(r))+'" target="_blank" rel="noopener">Check in Google Maps</a></div>';
+}
+
 function detourPanel(b){
   const c=bh17(b), d=detourOf(b);
   let h='<div class="dr-sec">Detour length &mdash; B.H.17</div>'+
@@ -3635,10 +3801,10 @@ function detourPanel(b){
   if(d===null||!d.bypass)
     return h+'<dt>Measured</dt><dd style="color:#5A5A5A;font-size:12px">not measured &mdash; this structure '+
       'was not in the statewide run</dd></dl>';
-  h+='<dt>Calculated detour length</dt><dd>'+detourVal(d.bypass,b,'bypass')+'</dd>';
+  h+='<dt>Calculated detour length</dt><dd>'+detourVal(d.bypass,b,'bypass')+detourRouteHtml(b,d.bypass)+'</dd>';
   const under=d.under.filter(r=>r.verdict!=='none_beneath');
   if(under.length) under.forEach(r=>{
-    h+='<dt>Calculated detour length, road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r,b,'collapse')+'</dd>'; });
+    h+='<dt>Calculated detour length, road beneath</dt><dd><div style="font-size:12px">'+esc(r.road||'')+'</div>'+detourVal(r,b,'collapse')+detourRouteHtml(b,r)+'</dd>'; });
   else{ const nb=d.under.find(r=>r.verdict==='none_beneath');
     h+='<dt>Calculated detour length, road beneath</dt><dd style="color:#5A5A5A;font-size:12px">'+esc(nb?nb.reason:'no road-beneath measurement recorded')+'</dd>'; }
   return h+'</dl><div style="font-size:11.5px;color:#5A5A5A;margin:-2px 0 8px">Measured on the road network ('+
@@ -4082,6 +4248,17 @@ async function featuresOnOpen(bn){
   if(b&&!DETOURASKED.has(bnKey(b)))
     loadDetour([b.BRDG_NBR]).then(()=>{ revalidate(); if(SEL===bn) drawDetail(b); renderTable(); })
       .catch(()=>{ /* additive: the bridge still reviews without it */ });
+  /* and the route behind it: drawn as soon as it arrives, if this bridge is
+     still the one open, without moving the map - "Show on the map" fits it */
+  if(b) loadDetourRoute(b.BRDG_NBR).then(()=>{
+      if(SEL!==bn) return;
+      const k=bnKey(b), rows=DROUTE.get(k)||[];
+      if(!(DSHOWN&&DSHOWN.bn===k)&&rows.length){
+        const first=rows.find(r=>r.mode==='bypass')||rows[0];
+        drawDetour(b.BRDG_NBR,first.mode,first.seq,false);
+      }
+      drawDetail(b);
+    }).catch(()=>{ /* the distances stand on their own; the route is extra */ });
   if(!b||b._featDone||b._featBusy||!b.LAT_DD) return;
   if(!b._twins) twinScan();
   b._featBusy=true;
@@ -4616,6 +4793,7 @@ function renderTable(){
    ========================================================================== */
 function select(bn,fromTable){
   SEL=bn; const b=ALL.find(x=>x.BRDG_NBR===bn); if(!b) return;
+  if(DSHOWN&&DSHOWN.bn!==String(bn).trim()) clearDetourMap();
   renderTable(); drawDetail(b); drawRoute(b._rid);
   featuresOnOpen(bn);
   $('drawer').classList.add('open');
@@ -5112,6 +5290,15 @@ function drawDetail(b){
   });
   $('dr-body').querySelectorAll('a.rstr').forEach(a=>a.onclick=e=>{
     e.preventDefault(); unclearFinding(bn,a.dataset.rule); });
+  /* "Show on the map": draw that detour and fit the map to it. On a phone the
+     panel covers the map, so it closes - leaving the bridge selected. */
+  $('dr-body').querySelectorAll('a[data-dshow]').forEach(a=>a.onclick=e=>{
+    e.preventDefault();
+    const [mode,seq]=a.dataset.dshow.split('|');
+    if(!drawDetour(bn,mode,Number(seq),true)) return;
+    if(window.innerWidth<=860) $('drawer').classList.remove('open');
+    drawDetail(b);
+  });
 }
 function zoomTo(bn){const b=ALL.find(x=>x.BRDG_NBR===bn); if(b&&b.LAT_DD) map.setView([b.LAT_DD,b.LONG_DD],17);}
 

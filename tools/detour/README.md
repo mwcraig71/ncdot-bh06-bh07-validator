@@ -86,3 +86,54 @@ Units: closer to the code as miles on 89% of 15,385 structures (95% for bridges
 alone), median ratio 1.03 from code 10 up. Code 1 sits on 7,132 structures (36%)
 at a median 2.3x the code. Code 99 matches a measured dead end on 1,005 of 1,579
 (64%).
+
+## The route behind each detour (15 October 2026)
+
+The first pass kept only distances. `routes.py` repeats each published
+measurement on the same graph (the same anchors and the same blocked edges,
+reached through the same code) and keeps what it was measured on: the two
+measuring points, the closed points, the open and the closed route as encoded
+polylines (precision 6, simplified to about 2 m), and the roads each route
+uses, in order, with the distance on each. A route is kept only if it
+reproduces the published distances to within 0.01 mi.
+
+```bash
+cd <run dir>            # the bridges' run, then the culverts' and pipes'
+python3 routes.py . 0 2 & python3 routes.py . 1 2 &       # writes routes_<w>.jsonl
+python3 export_routes.py <repo>/data/detour_routes <bridges run dir> <culverts run dir>
+```
+
+The tool reads them from table `detour_route` (migration 0046), one bridge at a
+time when the bridge is opened. They load without the ingest token: the files
+are pushed to the repository and the database fetches each one from GitHub,
+as the database owner, in the SQL editor or through the Supabase connector:
+
+```sql
+-- 1. ask for the file; note the request id it returns
+select net.http_get(url := 'https://raw.githubusercontent.com/mwcraig71/ncdot-bh06-bh07-validator/main/data/detour_routes/routes_01.json',
+                    timeout_milliseconds := 60000);
+-- 2. once net._http_response has status 200 for that id, load it
+insert into detour_route (brdg_nbr, mode, seq, a, b, block, open_mi, around_mi, open_path,
+                          closed_path, open_steps, closed_steps, graph_vintage, run_id)
+select x.brdg_nbr, x.mode, x.seq, x.a, x.b, x.block, x.open_mi, x.around_mi, x.open_path,
+       x.closed_path, x.open_steps, x.closed_steps, x.graph_vintage, x.run_id
+  from jsonb_to_recordset((select content::jsonb from net._http_response where id = <request id>))
+       as x(brdg_nbr text, mode text, seq smallint, a jsonb, b jsonb, block jsonb, open_mi numeric,
+            around_mi numeric, open_path text, closed_path text, open_steps jsonb,
+            closed_steps jsonb, graph_vintage text, run_id bigint)
+on conflict (brdg_nbr, mode, seq) do update
+  set a = excluded.a, b = excluded.b, block = excluded.block, open_mi = excluded.open_mi,
+      around_mi = excluded.around_mi, open_path = excluded.open_path,
+      closed_path = excluded.closed_path, open_steps = excluded.open_steps,
+      closed_steps = excluded.closed_steps, graph_vintage = excluded.graph_vintage,
+      run_id = excluded.run_id, loaded_at = now();
+```
+
+On 15 October the first export numbered Valhalla's ramp manoeuvres wrongly; `relabel_routes.py`
+re-asked each route between its stored points with the same closure and replaced only the road
+lists. 24,502 of 24,512 matched to 0.001 mi and were relabelled; the other 10 (stored points are
+rounded to 6 decimals, which moved the snap) kept their verified routes, with mislabelled
+"(ramp)" steps renamed "(unnamed road)".
+
+Migration 0047 then closes `ingest_detour_route` and the table's write grants,
+since nothing writes to it until the next run.
