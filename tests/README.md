@@ -205,7 +205,7 @@ bridge's own on the carried road, the road-beneath detour on a road under it. It
 last section fails the read and asserts the tool says "not looked up" rather than
 drawing an empty state, and raises no finding on missing data.
 
-It also pins the route behind each detour (migration 0046): opening a bridge reads its route, one bridge at a time, and draws the detour in orange, the normal route dashed grey, the measuring points as A and B and the closed point in red; the panel lists the detour road by road with a total equal to the detour, links to the same path in Google Maps, and "Show on the map" fits the map to it. Opening another bridge clears it, a dead end draws nothing, a route not on file says so, and a failed route read leaves the distances standing.
+It also pins the route behind each detour (migration 0046): opening a bridge reads its route, one bridge at a time, and draws the detour in orange, the normal route dashed, the measuring points as A and B and the closed point in red; the panel lists the detour road by road with a total equal to the detour, links to the same path in Google Maps, and "Show on the map" fits the map to it. Opening another bridge clears it, a dead end draws nothing, a route not on file says so, and a failed route read leaves the distances standing.
 
 And it pins the Figure 102 figure (migration 0048). Where the turn points are on file, the
 headline is the turn-point figure, not the bridge-end one, says how it was measured and what the

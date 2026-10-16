@@ -383,7 +383,7 @@ body.field.sheet #fieldbar{background:var(--orange)}
   text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.4)}
 .dt-key{background:#fff;padding:7px 10px;font-size:12px;line-height:1.5;box-shadow:0 1px 5px rgba(0,0,0,.3);max-width:320px}
 .dt-key .sw{display:inline-block;width:18px;height:4px;vertical-align:middle;margin-right:4px}
-.dt-key .sw.dash{background:repeating-linear-gradient(90deg,#7A7A7A 0 5px,transparent 5px 9px)}
+.dt-key .sw.dash{background:repeating-linear-gradient(90deg,#222 0 5px,#fff 5px 9px);outline:1px solid #ddd}
 .dt-key .sw.dot{width:10px;height:10px;border:3px solid #B00020;border-radius:50%;background:#fff;box-sizing:border-box}
 .dt-acts{margin-top:2px}
 .pop-sub{margin-top:8px;padding-top:6px;border-top:1px solid #ddd;font-size:11.5px;color:var(--black)}
@@ -3006,7 +3006,7 @@ function detourVal(r,b,mode){
 
    It is read for one bridge at a time, when that bridge is opened, so it costs
    nothing until it is wanted. On the map the detour is drawn in orange, the
-   normal route dashed grey, A and B as lettered dots, and the closed points
+   normal route in dark dashes on white, A and B as lettered dots, and the closed points
    in red. In the panel each detour lists its roads in order with the
    distance on each, totalled, so the number can be checked line by line, and
    links to the same path in Google Maps.
@@ -3091,8 +3091,11 @@ function drawDetour(bn,mode,seq,fit){
   clearDetourMap();
   if(!r) return false;
   const v=routeView(r), closed=decodePath(v.detour), open=decodePath(v.normal);
-  if(open.length>1) detourLayer.addLayer(L.polyline(open,{color:'#7A7A7A',weight:4,opacity:.9,
-    dashArray:'7 7',interactive:false}));
+  /* dark dashes on a white halo: plain grey vanished against a grey road on the satellite map */
+  if(open.length>1){
+    detourLayer.addLayer(L.polyline(open,{color:'#FFFFFF',weight:8,opacity:.9,interactive:false}));
+    detourLayer.addLayer(L.polyline(open,{color:'#222222',weight:4,opacity:1,dashArray:'8 6',interactive:false}));
+  }
   if(closed.length>1){
     detourLayer.addLayer(L.polyline(closed,{color:'#FFFFFF',weight:9,opacity:.85,interactive:false}));
     detourLayer.addLayer(L.polyline(closed,{color:'#E8590C',weight:5,opacity:1})

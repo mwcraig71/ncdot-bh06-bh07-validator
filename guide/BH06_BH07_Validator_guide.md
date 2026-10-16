@@ -779,7 +779,7 @@ and never reads them as miles.
   where the detour turns off the road to where it turns back on, less the normal route between
   those two points (FHWA SNBI Figure 102). From the bridge ends it would be 4.5 mi." That is bridge
   590141, Billy Graham Parkway northbound over Sugar Creek, which NCDOT codes 1. Under it the
-  subtraction is spelled out: "Detour 3.297 − normal route 2.264 = 1.033 mi extra, from turn-off A
+  subtraction is spelled out: "Detour 3.302 − normal route 2.264 = 1.038 mi extra, from turn-off A
   to turn back on B."
 
   Where the bridge-end figure is kept, the panel says why and gives the trip in plain words:
@@ -836,7 +836,7 @@ A distance alone can't be checked, so every measured detour also carries the rou
 measured on. Open a bridge and its detour is drawn on the map:
 
 - **Orange:** the detour, with the bridge closed, from turn-off A to turn back on B.
-- **Dashed grey:** the normal route between the same two points, across the bridge.
+- **Dark dashes on white:** the normal route between the same two points, across the bridge.
 - **A and B:** the turn points: A where the detour leaves the road, B where it comes back on.
   Where the figure is from the bridge ends, A and B are the bridge-end measuring points.
 - **Red ring:** the point that was closed.

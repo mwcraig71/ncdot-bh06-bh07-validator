@@ -186,7 +186,7 @@ driver doubles back 11 mi along US 17 before turning off. From the turn points i
 by NC 343 against 12.5 mi on US 17, so 5.2 mi. NCDOT appears to code long detours from the bridge.
 
 The figures were spot-checked on 290 bridges against bridges the owner knows, including 590141
-(1.03; NCDOT 1) and 210049 (loop road, kept at 7.1; NCDOT 7).
+(1.04; NCDOT 1) and 210049 (loop road, kept at 7.1; NCDOT 7).
 
 Run, then export:
 
