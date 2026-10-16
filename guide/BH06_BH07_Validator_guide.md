@@ -308,7 +308,8 @@ bridge, so use pin drop to confirm a value — never to harvest one blindly.
 
 ### FHWA submittal checks
 
-These are the published SNBI validation rules. They are what actually fails.
+These are the published SNBI validation rules, which are what actually fails, plus one check of
+B.H.17 against the calculated detour.
 
 | Rule | What it tests |
 |---|---|
@@ -317,6 +318,7 @@ These are the published SNBI validation rules. They are what actually fails.
 | **BH06-4** | BH06 must *not* be reported where B.H.18 (Crossing Bridge Number) shows the highway feature is carried on another bridge. |
 | **BH07-1** | Mile point must be a valid numeric value. |
 | **BH07-2** | Mile point must not exceed 8 digits. |
+| **BH17** | B.H.17 must be within 1 mile of the calculated detour. *Not a published FHWA rule:* this tool's own check, put in this group because a detour that far off should not be submitted. See [Detour length](#detour-length--bh17-and-the-detour-as-measured). |
 
 **Fetch HPMS from FHWA** settles BH06-3 outright, with nothing to request from anybody. FHWA
 republishes each state's HPMS submittal as a public feature service, and North Carolina's
@@ -801,17 +803,25 @@ so 30 ft was used.
 
 ### The findings
 
-- **B.H.17 gives a detour, but there is no other way across**: a warning. The bridge is the only
-  way to the far side.
-- **Coded "no detour" (99), but a way around exists**: a warning.
-- **Coded "bypass at the site" (0), but the measured detour is long**: a warning, at more than 2
-  miles.
-- **B.H.17 differs from the measured detour**: a note only, when the gap is both more than half and
-  more than 5 miles. On code 1 the measurement now agrees with NCDOT to a median within 10%. The
-  gap is mostly on long codes: from 5 miles up, NCDOT's codes run a median of about twice the
-  Figure 102 measurement, and match the bridge-end measurement instead (median ratio 1.03). So a
-  long code may have been measured from the bridge rather than from the turn points. The panel
-  shows both figures.
+- **B.H.17 more than 1 mile from the calculated detour**: an **FHWA submittal check**, and an
+  error. NCDOT's coded miles are compared with the calculated detour (the Figure 102 figure, or
+  the bridge-end figure on a loop road), and a gap of more than 1 mile fails. Code 0, a bypass at
+  the site, is compared as 0 miles. It is not one of FHWA's published edit checks; it sits with
+  them because a detour that far off should not be submitted. Where it passes, the panel says
+  B.H.17 was compared; where it could not be compared (code 99, no code, no calculated detour),
+  the panel says why, so a pass never hides an untested item.
+
+  Expect it to fire often. Statewide, 8,016 of the 17,521 bridges, culverts and pipes with both a
+  coded distance and a calculated detour are more than a mile apart (46%). Most of the large gaps
+  are long codes: from 5 miles up, NCDOT's codes run about twice the Figure 102 figure and match
+  the distance from the bridge ends instead, which the panel shows beside it.
+- **B.H.17 gives a detour, but there is no other way across**: a QC warning. The bridge is the
+  only way to the far side.
+- **Coded "no detour" (99), but a way around exists**: a QC warning.
+
+The B.H.17 check replaced two looser findings: "coded 0, but the measured detour is long" (more
+than 2 miles) and "B.H.17 differs from the measured detour" (more than half and more than 5
+miles). Both are inside the 1-mile check.
 
 ### Where it shows
 

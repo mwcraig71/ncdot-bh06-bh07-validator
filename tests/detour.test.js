@@ -187,31 +187,45 @@ const fields=l=>{const out=[];let cur='',q=false;
 
   console.log('\n3. The findings fire where the road network contradicts the code, and only there');
   const fl=await p.evaluate(()=>Object.fromEntries(ALL.map(b=>[b.BRDG_NBR,
-    b._flags.filter(f=>f.indexOf('DETOUR_')===0)])));
+    b._flags.filter(f=>f.indexOf('DETOUR_')===0||f==='BH17_MEASURED')])));
   console.log('   '+JSON.stringify(fl));
-  ok('590819: coded 2, measured 1.86 — agreement raises nothing',fl['590819'].length,0);
+  ok('590819: coded 2, calculated 1.86 — within a mile, raises nothing',fl['590819'].length,0);
   ok('590207: coded 99, but a way around exists',fl['590207'].join(),'DETOUR_99_MEASURED');
   ok('590213: coded 1 mile, but the bridge is the only way across',fl['590213'].join(),'DETOUR_CODED_DEAD_END');
-  ok('590668: coded "bypass at the site", but 3.1 miles to go',fl['590668'].join(),'DETOUR_0_LONG');
-  ok('590669: not in the run — nothing to contradict, so nothing is claimed',fl['590669'].length,0);
-  ok('the three contradictions are warnings',
-     await p.evaluate(()=>['DETOUR_CODED_DEAD_END','DETOUR_99_MEASURED','DETOUR_0_LONG']
+  ok('590668: coded 0, a bypass at the site, but 3.1 miles calculated — fails B.H.17',fl['590668'].join(),'BH17_MEASURED');
+  ok('590669: not in the run — nothing to compare, so nothing is claimed',fl['590669'].length,0);
+  ok('the two contradictions the road network answers outright are QC warnings',
+     await p.evaluate(()=>['DETOUR_CODED_DEAD_END','DETOUR_99_MEASURED']
        .every(id=>RULEMAP[id].sev==='w'&&RULEMAP[id].grp==='qc')),true);
+  ok('the B.H.17 check is an FHWA submittal check, and an error',
+     await p.evaluate(()=>[RULEMAP.BH17_MEASURED.grp,RULEMAP.BH17_MEASURED.sev,RULEMAP.BH17_MEASURED.code].join()),'fhwa,e,BH17');
+  ok('...so the bridge counts as failing FHWA',
+     await p.evaluate(()=>ALL.find(x=>x.BRDG_NBR==='590668')._fhwa>=1),true);
+  ok('the two looser detour findings it replaced are gone',
+     await p.evaluate(()=>!RULEMAP.DETOUR_0_LONG&&!RULEMAP.DETOUR_FAR_OFF),true);
   ok('...and they reach the checklist counts',
      await p.evaluate(()=>{renderChecks();
        const c={}; ALL.forEach(b=>(b._eff||b._flags).forEach(f=>{c[f]=(c[f]||0)+1;}));
-       return [c.DETOUR_99_MEASURED,c.DETOUR_CODED_DEAD_END,c.DETOUR_0_LONG].join();}),'1,1,1');
-  /* A plain mismatch is a note, not a warning: from code 10 up the two agree to
-     a median within 3%, so only a large gap is worth raising - and quietly. */
-  await p.evaluate(()=>{ALL.find(x=>x.BRDG_NBR==='590819').DETOUR_LEN='8'; revalidate();});
-  ok('coded 8, measured 1.86 — more than half and 5 miles off — is a note',
-     await p.evaluate(()=>ALL.find(x=>x.BRDG_NBR==='590819')._flags.filter(f=>f.indexOf('DETOUR_')===0).join()),
-     'DETOUR_FAR_OFF');
-  ok('...whose severity is a note, so it colours nothing',
-     await p.evaluate(()=>RULEMAP.DETOUR_FAR_OFF.sev),'i');
-  await p.evaluate(()=>{ALL.find(x=>x.BRDG_NBR==='590819').DETOUR_LEN='5'; revalidate();});
-  ok('coded 5, measured 1.86 — under 5 miles apart — raises nothing',
-     await p.evaluate(()=>ALL.find(x=>x.BRDG_NBR==='590819')._flags.filter(f=>f.indexOf('DETOUR_')===0).length),0);
+       return [c.DETOUR_99_MEASURED,c.DETOUR_CODED_DEAD_END,c.BH17_MEASURED].join();}),'1,1,1');
+  const b17=async code=>{ await p.evaluate(c=>{ALL.find(x=>x.BRDG_NBR==='590819').DETOUR_LEN=c; revalidate();},code);
+    return p.evaluate(()=>ALL.find(x=>x.BRDG_NBR==='590819')._flags.filter(f=>f==='BH17_MEASURED').length); };
+  ok('coded 8, calculated 1.86 — fails',await b17('8'),1);
+  ok('coded 3, calculated 1.86 — 1.14 mi apart, fails',await b17('3'),1);
+  ok('coded 1, calculated 1.86 — 0.86 mi apart, passes',await b17('1'),0);
+  ok('coded 99 is not compared as a distance',await b17('99'),0);
+  ok('a blank code is not compared',await b17(''),0);
+  await p.evaluate(()=>{const d=DETOUR.get('590819'), o=d.bypass;
+    d.bypass=Object.assign({},o,{additional_mi:2.86}); window.__o=o;});
+  ok('coded 2, calculated 2.86 — exactly within the mile, passes',await b17('2'),0);
+  await p.evaluate(()=>{DETOUR.get('590819').bypass=window.__o;});
+  const pass819=await p.evaluate(()=>{ALL.find(x=>x.BRDG_NBR==='590819').DETOUR_LEN='2'; revalidate(); select('590819',true);
+    return document.getElementById('dr-body').innerText;});
+  ok('a pass says B.H.17 was compared',/B\.H\.17 is within a mile of the calculated detour/.test(pass819),true);
+  const pass207=await p.evaluate(()=>{select('590207',true); return document.getElementById('dr-body').innerText;});
+  ok('...and says why when it was not',/B\.H\.17 is not compared: NCDOT codes 99, no detour\./.test(pass207),true);
+  const fail668=await p.evaluate(()=>{select('590668',true); return document.getElementById('dr-body').innerText;});
+  ok('a failing bridge shows it under the FHWA submittal checks',
+     /FHWA SUBMITTAL CHECKS[\s\S]{0,80}B\.H\.17 more than 1 mile from the calculated detour/i.test(fail668),true);
   await p.evaluate(()=>{ALL.find(x=>x.BRDG_NBR==='590819').DETOUR_LEN='2'; revalidate();});
 
   console.log('\n4. The panel shows the code and the measurement as two things');
@@ -535,6 +549,9 @@ const fields=l=>{const out=[];let cur='',q=false;
   ok('...a figure with no basis on file is labelled bridge ends',at2('590819','DETOUR_BASIS'),'BRIDGE ENDS');
   ok('...a dead end leaves both blank',[at2('590213','DETOUR_BASIS'),at2('590213','DETOUR_EXTRA_BRIDGE_ENDS_MI')].join('|'),'|');
   ok('...and the header and rows still line up',r2.every(r=>r.length===c2.length),true);
+  ok('CSV: a B.H.17 failure is in the FHWA columns',
+     [at2('590668','FAILS_FHWA'),at2('590668','FHWA_RULES'),/B\.H\.17 more than 1 mile/.test(at2('590668','FHWA_FINDINGS'))].join(' / '),
+     'YES / BH17 / true');
 
   console.log('\n8. A failed read is reported, not drawn as "no detour anywhere"');
   const {p:p2,m:m2}=await mk(b,{fail:'detour_measured'});

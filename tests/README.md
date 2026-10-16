@@ -216,6 +216,11 @@ road keeps its bridge-end figure and says only local traffic uses the bridge; a 
 basis on file reads as the bridge-end figure it is; and the CSV carries the figure, its basis and
 the bridge-end figure beside it.
 
+And it pins the B.H.17 check (BH17_MEASURED), an FHWA-group error: a coded distance more than 1 mile
+from the calculated detour fails, code 0 is compared as 0 miles, 99 and a blank are not compared,
+exactly 1 mile apart passes; the bridge counts as failing FHWA in the panel and the CSV; and the
+pass box says whether B.H.17 was compared, and why not when it was not.
+
 It also pins three fixes from the 13 October review. The panel never calls the
 trip between the measuring points "straight across": on a divided highway those
 points sit out where a driver can leave, so that trip can be a mile or more, and
@@ -234,7 +239,7 @@ and whether it pages. A mock that ignored those would pass either way.
 
 Counts, all passing on all three builds: **36** data, **16** basemap, **37**
 corrections, **37** auth, **106** features, **21** columns, **66** field,
-**51** approvals, **60** traffic, **128** detour — 558 in all.
+**51** approvals, **60** traffic, **138** detour — 568 in all.
 
 The database has its own tests under `supabase/tests/`, including one that runs
 against the live project over HTTPS with the publishable key.

@@ -852,6 +852,13 @@ const RULES=[
   d:'The LRS Mile Point must be a valid numeric value. Null or non-numeric fails.'},
  {id:'BH07_2_LEN', grp:'fhwa', code:'BH07-2', sev:'e', t:'BH07 over 8 digits',
   d:'The mile point must not exceed 8 digits, counted on the reported 3-decimal value. The longest legitimate NC value is 84.221, so this should never trip. NCDOT publishes full precision (e.g. 0.06507547 = 9 digits) — reporting that unrounded would fail.'},
+ /* B.H.17 against the calculated detour. Not one of FHWA's published edit
+    checks: the owner's rule that the coded detour must agree with the
+    calculated one to within a mile before it is submitted. It replaced two
+    looser detour findings (0 coded with more than 2 mi measured; a gap of
+    more than half and more than 5 mi), both of which it covers. */
+ {id:'BH17_MEASURED', grp:'fhwa', code:'BH17', sev:'e', t:'B.H.17 more than 1 mile from the calculated detour',
+  d:'NCDOT\u2019s coded detour length and the calculated one differ by more than 1 mile. The calculated figure is FHWA SNBI Figure 102\u2019s: from where the detour turns off the road to where it turns back on, less the normal route between those points (on a loop road, where only local traffic uses the bridge, from the bridge ends). Code 0, a bypass at the site, is read as 0 miles. This is not one of FHWA\u2019s published edit checks; it is this tool\u2019s rule that the two agree before B.H.17 is submitted. Codes from 5 miles up often match the distance from the bridge ends instead, which the panel shows beside it \u2014 so a long code may have been measured from the bridge rather than from the turn points.'},
 
  /* ---------------- Strinteg QC checks ---------------- */
  {id:'MP_BEYOND', grp:'qc', sev:'e', t:'BH07 beyond end of route',
@@ -925,10 +932,6 @@ const RULES=[
   d:'NCDOT codes a detour length for this structure, but on the road network the far side is reachable only over this bridge: with the deck closed, nothing connects the two sides. Either the coded detour uses a road the map does not have \u2014 private, gated or seasonal \u2014 or the code is a default rather than a measurement. 377 structures statewide are in this position.'},
  {id:'DETOUR_99_MEASURED', grp:'qc', sev:'w', t:'Coded \u201cno detour\u201d (99), but a way around exists',
   d:'NCDOT uses 99 here. On most structures that matches a measured dead end \u2014 1,005 of 1,579 statewide \u2014 but on this one the road network does have a way around, and its length is in the panel. Either 99 means more than \u201cno detour\u201d to NCDOT, or the way around uses roads NCDOT does not count.'},
- {id:'DETOUR_0_LONG', grp:'qc', sev:'w', t:'Coded \u201cbypass at the site\u201d (0), but the measured detour is long',
-  d:'Code 0 means traffic can get past at the structure itself. With this deck closed, the shortest way around on the road network adds more than 2 miles, so no bypass at the site is visible. A temporary or unmapped crossing would explain it; otherwise the code is wrong.'},
- {id:'DETOUR_FAR_OFF', grp:'note', sev:'i', t:'B.H.17 differs from the measured detour',
-  d:'The coded detour and the measured one differ by more than half and by more than 5 miles. The measurement is FHWA SNBI Figure 102\u2019s: from where the detour turns off the road to where it turns back on, less the normal route between those points. Statewide, codes of 5 miles and up run a median of about twice that measurement, and match the distance measured from the bridge ends instead (shown in the panel) \u2014 so a long code here may have been measured from the bridge rather than from the turn points. On code 1 the two agree to a median within 10%.'}
 ];
 const RULEMAP=Object.fromEntries(RULES.map(r=>[r.id,r]));
 const SEVCOL={e:'#CF3910',w:'#C9A227',i:'#1E56B3',ok:'#2E7D32'};
@@ -2845,8 +2848,7 @@ function trafficPop(t,top){
    ========================================================================== */
 const DETOUR=new Map();           /* brdg_nbr -> {bypass, under:[...], vintage} */
 let DETOURASKED=new Set();        /* structures looked up, so "not measured" is distinguishable */
-const DETOUR_FAR_MI=5;            /* a coded value this far off, and off by half, is a note */
-const DETOUR_SITE_MI=2;           /* "bypass at the site" with more than this measured */
+const DETOUR_TOL_MI=1;            /* B.H.17 further than this from the calculated detour fails (BH17_MEASURED) */
 const bnKey=b=>String(b&&b.BRDG_NBR!=null?b.BRDG_NBR:'').trim();
 
 /* B.H.17 decoded. The number and what NCDOT means by it travel together. */
@@ -2900,17 +2902,36 @@ function detourOf(b){
   return DETOUR.get(k)||null;
 }
 
-/* The findings. Each is a disagreement between the code and the road network
-   where the network's answer is unambiguous; plain mismatches are a note. */
+/* Was B.H.17 compared with the calculated detour, and if not, why not -
+   so a pass never hides an untested item. */
+function b17Tested(b){
+  const d=detourOf(b), c=bh17(b);
+  return !!(d&&d.bypass&&(c.kind==='miles'||c.kind==='site')&&
+    (d.bypass.verdict==='ok'||d.bypass.verdict==='bypass_at_site')&&d.bypass.additional_mi!=null);
+}
+function b17Why(b){
+  const d=detourOf(b), c=bh17(b);
+  if(d===undefined) return 'the calculated detour has not been read yet';
+  if(!d||!d.bypass) return 'this structure has no calculated detour';
+  if(c.code==null) return 'NCDOT has not coded it';
+  if(c.kind==='none') return 'NCDOT codes 99, no detour';
+  if(c.kind==='special') return 'NCDOT\u2019s code is not a distance';
+  return d.bypass.verdict==='no_detour'?'the road network has no way around':'the detour could not be calculated';
+}
+
+/* The findings. Two are disagreements the road network answers outright: a
+   dead end coded with a detour, and 99 coded where a way around exists. The
+   third, BH17_MEASURED, is in the FHWA group: a coded distance more than a
+   mile from the calculated one fails the submission check. */
 function detourFlags(b){
   const d=detourOf(b), c=bh17(b), out=[];
   if(!d||!d.bypass||c.code==null) return out;
   const v=d.bypass.verdict, a=d.bypass.additional_mi;
   if((c.kind==='miles'||c.kind==='site')&&v==='no_detour') out.push('DETOUR_CODED_DEAD_END');
   if(c.kind==='none'&&(v==='ok'||v==='bypass_at_site')) out.push('DETOUR_99_MEASURED');
-  if(c.kind==='site'&&v==='ok'&&a!=null&&a>DETOUR_SITE_MI) out.push('DETOUR_0_LONG');
-  if(c.kind==='miles'&&v==='ok'&&a!=null&&Math.abs(a-c.code)>DETOUR_FAR_MI&&(a>1.5*c.code||a<0.5*c.code))
-    out.push('DETOUR_FAR_OFF');
+  /* the coded miles (0 for a bypass at the site) against the calculated detour */
+  if((c.kind==='miles'||c.kind==='site')&&(v==='ok'||v==='bypass_at_site')&&a!=null&&
+     Math.abs(a-c.code)>DETOUR_TOL_MI) out.push('BH17_MEASURED');
   return out;
 }
 
@@ -3795,7 +3816,7 @@ function populateFilters(){
 }
 
 const GROUPS=[
- {k:'fhwa', t:'FHWA submittal checks', s:'published SNBI rules — these fail on submission'},
+ {k:'fhwa', t:'FHWA submittal checks', s:'published SNBI rules, and B.H.17 against the calculated detour — these fail on submission'},
  {k:'qc',   t:'Strinteg QC — likely wrong', s:'passes FHWA, still not right'},
  {k:'note', t:'Strinteg notes', s:'informational, nothing to fix'}
 ];
@@ -3993,10 +4014,11 @@ function cell(b,k){
     return c.kind==='miles'?String(c.code):'<span title="'+esc(c.label)+'">'+c.code+
       ' <span style="color:#5A5A5A">'+({site:'site',none:'none',special:'?'}[c.kind]||'')+'</span></span>'; }
   if(k==='_detour'){ const d=detourOf(b); if(!d||!d.bypass) return '';
-    const r=d.bypass, odd=b._flags.some(f=>f.indexOf('DETOUR_')===0&&RULEMAP[f]&&RULEMAP[f].sev==='w');
+    const r=d.bypass, bad=b._flags.includes('BH17_MEASURED'),
+          odd=bad||b._flags.some(f=>f.indexOf('DETOUR_')===0&&RULEMAP[f]&&RULEMAP[f].sev==='w');
     const txt=r.verdict==='ok'?r.additional_mi.toFixed(1):r.verdict==='bypass_at_site'?'0.0 site':
               r.verdict==='no_detour'?'none':'\u2014';
-    return '<span'+(odd?' style="color:#C9A227"':'')+' title="'+esc(r.verdict==='unmeasured'?r.reason||'':
+    return '<span'+(odd?' style="color:'+(bad?'#CF3910':'#C9A227')+'"':'')+' title="'+esc(r.verdict==='unmeasured'?r.reason||'':
       'extra miles with the deck closed')+'">'+txt+'</span>'; }
   if(k==='_cond'){ if(!b._snbi) return '';
     const v=['DeckCondition','SuperStructureCondition','SubStructureCondition'].map(x=>b._snbi[x]==null?'-':b._snbi[x]);
@@ -4439,7 +4461,9 @@ function drawDetail(b){
   h+='<div class="dr-sec">FHWA submittal checks</div>';
   if(!ff.length) h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6">'+
     '<b>Passes</b>BH06 and BH07 clear every FHWA validation rule'+(HPMS.size?', including the HPMS match.':
-    '. BH06-3 (HPMS match) is untested until you load your HPMS route list.')+'</div>';
+    '. BH06-3 (HPMS match) is untested until you load your HPMS route list.')+
+    (b17Tested(b)?' B.H.17 is within a mile of the calculated detour.'
+                 :' B.H.17 is not compared: '+b17Why(b)+'.')+'</div>';
   else ff.forEach(f=>{h+=findBlock(b,f,true);});
   h+='<div class="dr-sec">Strinteg QC</div>';
   if(!qf.length) h+='<div class="find" style="border-left-color:#2E7D32;background:#E6F1E6">'+

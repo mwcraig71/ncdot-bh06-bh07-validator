@@ -27,8 +27,9 @@ Built by [Strinteg Corporation](https://strinteg.com).
 | BH06-4 | Not reported where B.H.18 shows the feature is carried on another bridge |
 | BH07-1 | Valid numeric value |
 | BH07-2 | 8 digits maximum |
+| BH17 | Within 1 mile of the calculated detour (this tool's check, not a published FHWA rule) |
 
-**That is the entire FHWA check set.** Nothing in it tests whether the milepoint is anywhere
+**Apart from BH17, that is the entire FHWA check set.** Nothing in it tests whether the milepoint is anywhere
 near the route — a statewide mile marker number, or the measure of the road underneath, submits
 perfectly clean. So the tool adds a second group of checks for values that pass FHWA and are
 still wrong:
